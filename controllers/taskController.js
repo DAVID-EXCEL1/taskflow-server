@@ -49,7 +49,7 @@ exports.list = asyncHandler(async (req, res) => {
     if (q.dueFrom) filter.dueDate.$gte = new Date(q.dueFrom);
     if (q.dueTo) filter.dueDate.$lte = new Date(q.dueTo);
   }
-  if (q.overdue === 'true') { filter.dueDate = { ...(filter.dueDate || {}), $lt: new Date() }; filter.status = { $in: ['Pending', 'In Progress'] }; }
+  if (q.overdue === 'true') { and.push(svc.overdueClause()); filter.status = { $in: ['Pending', 'In Progress'] }; }
   if (and.length) filter.$and = and;
 
   const sortable = ['date', 'title', 'priority', 'status', 'dueDate', 'createdAt', 'updatedAt'];
@@ -77,6 +77,7 @@ exports.create = asyncHandler(async (req, res) => {
   const doc = { ...data, createdBy: req.user._id, date: data.date || new Date() };
   if (isOrgUser(req.user)) doc.organization = orgId(req.user); else doc.owner = req.user._id;
   for (const k of ['category', 'assignedTo', 'assignedTeam', 'dueDate']) if (!doc[k]) delete doc[k];
+  if (!doc.dueDate) doc.dueHasTime = false;
   if (doc.status === 'Completed') doc.completedAt = new Date();
   const task = await Task.create(doc);
 
@@ -109,6 +110,7 @@ exports.update = asyncHandler(async (req, res) => {
   const wasAssignedTo = String(task.assignedTo || ''); const wasTeam = String(task.assignedTeam || '');
   const wasStatus = task.status;
   for (const [k, v] of Object.entries(changes)) task[k] = v === '' ? undefined : v;
+  if ('dueDate' in changes && !changes.dueDate && !('dueHasTime' in changes)) task.dueHasTime = false;
   if (changes.status && changes.status !== wasStatus) task.completedAt = changes.status === 'Completed' ? new Date() : undefined;
   if (history.length) task.history.push(...history);
   await task.save();

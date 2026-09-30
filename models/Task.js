@@ -15,6 +15,8 @@ const schema = new mongoose.Schema(
     status: { type: String, enum: TASK_STATUSES, default: 'Pending', index: true },
     date: { type: Date, default: Date.now },
     dueDate: Date,
+    // false = date-only (legacy/all-day, due at end of that day). true = dueDate is an exact moment.
+    dueHasTime: { type: Boolean, default: false },
     note: { type: String, trim: true, maxlength: 2000 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     // Scope: personal tasks have `owner` only. Organization tasks have `organization`.

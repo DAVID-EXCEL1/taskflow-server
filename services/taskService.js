@@ -4,7 +4,7 @@ const User = require('../models/User');
 const AppError = require('../utils/AppError');
 const { ROLES } = require('../config/constants');
 
-const ALL_FIELDS = ['title', 'description', 'category', 'priority', 'status', 'date', 'dueDate', 'note', 'assignedTo', 'assignedTeam'];
+const ALL_FIELDS = ['title', 'description', 'category', 'priority', 'status', 'date', 'dueDate', 'dueHasTime', 'note', 'assignedTo', 'assignedTeam'];
 const ASSIGNEE_FIELDS = ['status', 'note'];
 
 // Query filter limiting tasks to what this user may SEE.
@@ -61,12 +61,23 @@ async function validateReferences(user, data) {
 
 const HISTORY_FIELDS = ['title', 'status', 'priority', 'dueDate', 'category', 'assignedTo', 'assignedTeam'];
 const str = (v) => (v == null ? '' : v instanceof Date ? v.toISOString().slice(0, 10) : String(v));
+const dueStr = (date, hasTime) => (!date ? '' : hasTime ? new Date(date).toISOString() : new Date(date).toISOString().slice(0, 10));
+
+// Overdue / upcoming rules. Date-only tasks are due at the END of their day; timed tasks at the exact moment.
+const startOfTodayUTC = (now) => new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+const overdueClause = (now = new Date()) => ({ $or: [{ dueHasTime: true, dueDate: { $lt: now } }, { dueHasTime: { $ne: true }, dueDate: { $lt: startOfTodayUTC(now) } }] });
+const upcomingClause = (now = new Date()) => ({ $or: [{ dueHasTime: true, dueDate: { $gte: now } }, { dueHasTime: { $ne: true }, dueDate: { $gte: startOfTodayUTC(now) } }] });
+
 function diffHistory(task, changes, user) {
   const entries = [];
   for (const f of HISTORY_FIELDS) {
     if (!(f in changes)) continue;
-    const before = str(task[f]);
-    const after = str(changes[f]);
+    let before = str(task[f]);
+    let after = str(changes[f]);
+    if (f === 'dueDate') {
+      before = dueStr(task.dueDate, task.dueHasTime);
+      after = dueStr(changes.dueDate, changes.dueHasTime ?? task.dueHasTime);
+    }
     if (before === after) continue;
     const scalar = ['title', 'status', 'priority', 'dueDate'].includes(f);
     entries.push({ field: f, from: scalar ? before : '', to: scalar ? after : '', by: user._id, byName: user.name, at: new Date() });
@@ -74,4 +85,4 @@ function diffHistory(task, changes, user) {
   return entries;
 }
 
-module.exports = { buildScope, editableFields, canDelete, validateReferences, diffHistory, ALL_FIELDS };
+module.exports = { overdueClause, upcomingClause, buildScope, editableFields, canDelete, validateReferences, diffHistory, ALL_FIELDS };

@@ -8,7 +8,7 @@ const ActivityLog = require('../models/ActivityLog');
 const asyncHandler = require('../utils/asyncHandler');
 const { ROLES, PLANS } = require('../config/constants');
 const { getAccess } = require('../services/subscriptionService');
-const { buildScope } = require('../services/taskService');
+const { buildScope, overdueClause, upcomingClause } = require('../services/taskService');
 
 const monthKey = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 function lastMonths(n) {
@@ -23,7 +23,7 @@ async function taskStats(scope) {
   const now = new Date();
   const [byStatus, overdue] = await Promise.all([
     Task.aggregate([{ $match: scope }, { $group: { _id: '$status', n: { $sum: 1 } } }]),
-    Task.countDocuments({ ...scope, dueDate: { $lt: now }, status: { $in: ['Pending', 'In Progress'] } }),
+    Task.countDocuments({ $and: [scope, overdueClause(now), { status: { $in: ['Pending', 'In Progress'] } }] }),
   ]);
   const c = Object.fromEntries(byStatus.map((s) => [s._id, s.n]));
   return { total: byStatus.reduce((a, s) => a + s.n, 0), pending: c['Pending'] || 0, inProgress: c['In Progress'] || 0, completed: c['Completed'] || 0, cancelled: c['Cancelled'] || 0, overdue };
@@ -84,7 +84,7 @@ exports.get = asyncHandler(async (req, res) => {
   const access = await getAccess(u);
   const stats = await taskStats(scope);
   const recent = await Task.find(scope).sort({ createdAt: -1 }).limit(6).populate(POP).select('-history').lean();
-  const upcoming = await Task.find({ ...scope, dueDate: { $gte: new Date() }, status: { $in: ['Pending', 'In Progress'] } }).sort({ dueDate: 1 }).limit(6).populate(POP).select('-history').lean();
+  const upcoming = await Task.find({ $and: [scope, upcomingClause(), { status: { $in: ['Pending', 'In Progress'] } }] }).sort({ dueDate: 1 }).limit(6).populate(POP).select('-history').lean();
   const base = { stats, recent, upcoming, access };
 
   if (u.role === ROLES.INDIVIDUAL) return res.json({ success: true, kind: 'individual', data: base });

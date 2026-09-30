@@ -32,7 +32,7 @@ const task = z.object({
   category: optId, assignedTo: optId, assignedTeam: optId,
   priority: z.enum(TASK_PRIORITIES).optional(),
   status: z.enum(TASK_STATUSES).optional(),
-  date: optDate, dueDate: optDate,
+  date: optDate, dueDate: optDate, dueHasTime: z.boolean().optional(),
 });
 const taskUpdate = task.partial();
 
