@@ -3,6 +3,7 @@ const fs = require('fs');
 const Subscription = require('../models/Subscription');
 const Payment = require('../models/Payment');
 const Setting = require('../models/Setting');
+const ProofFile = require('../models/ProofFile');
 const AppError = require('../utils/AppError');
 const asyncHandler = require('../utils/asyncHandler');
 const { ROLES, PLANS } = require('../config/constants');
@@ -49,29 +50,28 @@ exports.listPayments = asyncHandler(async (req, res) => {
     Payment.find(filter).populate('user', 'name email').populate('organization', 'name').populate('submittedBy', 'name email').populate('reviewedBy', 'name').sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Payment.countDocuments(filter),
   ]);
-  res.json({ success: true, data: rows.map(({ proof, ...p }) => ({ ...p, hasProof: !!proof?.filename })), pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
+  res.json({ success: true, data: rows.map(({ proof, ...p }) => ({ ...p, hasProof: !!proof?.mimeType })), pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
 });
 
 exports.submitPayment = asyncHandler(async (req, res) => {
-  try {
-    const payment = await svc.submitPayment(req.user, req.body, req.file);
-    res.status(201).json({ success: true, data: payment, message: 'Payment submitted. You will be notified once it is reviewed.' });
-  } catch (e) {
-    if (req.file) fs.unlink(req.file.path, () => {}); // do not keep orphaned uploads
-    throw e;
-  }
+  const payment = await svc.submitPayment(req.user, req.body, req.file);
+  res.status(201).json({ success: true, data: payment, message: 'Payment submitted. You will be notified once it is reviewed.' });
 });
 
-// Proof files are never served statically: only the admin or the owning account can open them.
+// Proof files are never public: only the Super Admin or the submitting account can open them.
 exports.proof = asyncHandler(async (req, res) => {
-  const filter = { _id: req.params.id, ...scopeFor(req.user) };
-  const payment = await Payment.findOne(filter).select('proof').lean();
-  if (!payment?.proof?.filename) throw new AppError('No proof was uploaded for this payment.', 404);
-  const file = path.join(__dirname, '..', 'uploads', path.basename(payment.proof.filename));
-  if (!fs.existsSync(file)) throw new AppError('Proof file is missing.', 404);
+  const payment = await Payment.findOne({ _id: req.params.id, ...scopeFor(req.user) }).select('proof').lean();
+  if (!payment?.proof?.mimeType) throw new AppError('No proof was uploaded for this payment.', 404);
   res.setHeader('Content-Type', payment.proof.mimeType);
   res.setHeader('Content-Disposition', 'inline');
-  res.sendFile(file);
+  const stored = await ProofFile.findOne({ payment: payment._id });
+  if (stored) return res.send(stored.data);
+  // Legacy: files saved on disk before proofs moved to MongoDB (lost if the server's disk was reset).
+  if (payment.proof.filename) {
+    const file = path.join(__dirname, '..', 'uploads', path.basename(payment.proof.filename));
+    if (fs.existsSync(file)) return res.sendFile(file);
+  }
+  throw new AppError('This proof file is no longer available. It was stored on temporary server storage that was reset.', 404);
 });
 
 exports.approve = asyncHandler(async (req, res) => {

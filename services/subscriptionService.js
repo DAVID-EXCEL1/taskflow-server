@@ -2,6 +2,8 @@ const Subscription = require('../models/Subscription');
 const Payment = require('../models/Payment');
 const Organization = require('../models/Organization');
 const AppError = require('../utils/AppError');
+const ProofFile = require('../models/ProofFile');
+const { hasValidSignature } = require('../utils/fileSignature');
 const { addMonths, daysBetween } = require('../utils/helpers');
 const { ROLES, PLANS, SUB_STATUS, PAYMENT_STATUS, RENEWAL_WINDOW_DAYS } = require('../config/constants');
 const { notify, notifyAdmins } = require('./notificationService');
@@ -74,6 +76,7 @@ async function submitPayment(user, body, file) {
   const planKey = planFor(user);
   const plan = PLANS[planKey];
 
+  if (file && !hasValidSignature(file)) throw new AppError('That file is not a valid JPG, PNG, WEBP or PDF.', 400);
   const access = await getAccess(user);
   if (access.hasPendingPayment) throw new AppError('You already have a payment awaiting approval.', 409);
   if (!access.canRenew) throw new AppError(`Your subscription is active until ${fmtDate(access.endDate)}. You can renew from ${fmtDate(access.renewOpensAt)}.`, 400);
@@ -85,8 +88,9 @@ async function submitPayment(user, body, file) {
   const payment = await Payment.create({
     ...subject, plan: planKey, amount: plan.price, submittedBy: user._id,
     paymentDate: body.paymentDate, reference: body.reference, description: body.description,
-    proof: file ? { filename: file.filename, originalName: file.originalname, mimeType: file.mimetype } : undefined,
+    proof: file ? { originalName: file.originalname, mimeType: file.mimetype, size: file.size } : undefined,
   });
+  if (file) await ProofFile.create({ payment: payment._id, data: file.buffer, mimeType: file.mimetype, originalName: file.originalname, size: file.size });
   const sub = await Subscription.create({ ...subject, plan: planKey, amount: plan.price, status: SUB_STATUS.PENDING, payment: payment._id });
   payment.subscription = sub._id;
   await payment.save();
