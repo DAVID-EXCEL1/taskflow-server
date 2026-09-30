@@ -25,6 +25,15 @@ const schema = new mongoose.Schema(
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     assignedTeam: { type: mongoose.Schema.Types.ObjectId, ref: 'Team', index: true },
     completedAt: Date,
+    // Repeating tasks. `anchor` is the series' original due date (used to avoid month-end drift).
+    recurrence: {
+      frequency: { type: String, enum: ['none', 'daily', 'weekly', 'monthly', 'yearly'], default: 'none' },
+      interval: { type: Number, default: 1, min: 1, max: 365 },
+      endDate: Date,
+      anchor: Date,
+    },
+    seriesId: { type: mongoose.Schema.Types.ObjectId, index: true },
+    recurrenceSpawned: { type: Boolean, default: false }, // guards against creating the next occurrence twice
     history: [historySchema],
   },
   { timestamps: true }

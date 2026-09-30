@@ -26,13 +26,15 @@ const login = z.object({ email, password: z.string().min(1, 'Password is require
 const profile = z.object({ name: z.string().trim().min(2).max(80).optional(), phone: optStr(30) });
 const changePassword = z.object({ currentPassword: z.string().min(1), newPassword: password });
 
+const recurrence = z.object({ frequency: z.enum(['none', 'daily', 'weekly', 'monthly', 'yearly']), interval: z.coerce.number().int().min(1, 'Repeat interval must be at least 1').max(365).default(1), endDate: optDate }).optional();
+
 const task = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200),
   description: optStr(5000), note: optStr(2000),
   category: optId, assignedTo: optId, assignedTeam: optId,
   priority: z.enum(TASK_PRIORITIES).optional(),
   status: z.enum(TASK_STATUSES).optional(),
-  date: optDate, dueDate: optDate, dueHasTime: z.boolean().optional(),
+  date: optDate, dueDate: optDate, dueHasTime: z.boolean().optional(), recurrence,
 });
 const taskUpdate = task.partial();
 

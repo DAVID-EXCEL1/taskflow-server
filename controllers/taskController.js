@@ -5,6 +5,7 @@ const AppError = require('../utils/AppError');
 const asyncHandler = require('../utils/asyncHandler');
 const { escapeRegex, pageParams } = require('../utils/helpers');
 const { ROLES } = require('../config/constants');
+const { nextOccurrence } = require('../utils/recurrence');
 const svc = require('../services/taskService');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
@@ -78,8 +79,13 @@ exports.create = asyncHandler(async (req, res) => {
   if (isOrgUser(req.user)) doc.organization = orgId(req.user); else doc.owner = req.user._id;
   for (const k of ['category', 'assignedTo', 'assignedTeam', 'dueDate']) if (!doc[k]) delete doc[k];
   if (!doc.dueDate) doc.dueHasTime = false;
+  if (doc.recurrence && doc.recurrence.frequency !== 'none') {
+    if (!doc.dueDate) throw new AppError('Set a due date to make a task repeat.', 400);
+    doc.recurrence = { ...doc.recurrence, anchor: doc.dueDate };
+  } else delete doc.recurrence;
   if (doc.status === 'Completed') doc.completedAt = new Date();
   const task = await Task.create(doc);
+  if (task.recurrence?.frequency && task.recurrence.frequency !== 'none') { task.seriesId = task._id; await task.save(); }
 
   await activity.log({ actor: req.user, action: 'TASK_CREATED', message: `Created task "${task.title}"`, organization: task.organization, entityType: 'Task', entityId: task._id });
   await notifyAssignment(req.user, task);
@@ -111,6 +117,13 @@ exports.update = asyncHandler(async (req, res) => {
   const wasStatus = task.status;
   for (const [k, v] of Object.entries(changes)) task[k] = v === '' ? undefined : v;
   if ('dueDate' in changes && !changes.dueDate && !('dueHasTime' in changes)) task.dueHasTime = false;
+  if ('recurrence' in changes || 'dueDate' in changes) {
+    if (task.recurrence?.frequency && task.recurrence.frequency !== 'none') {
+      if (!task.dueDate) throw new AppError('Set a due date to make a task repeat.', 400);
+      task.recurrence.anchor = task.dueDate;
+      if (!task.seriesId) task.seriesId = task._id;
+    }
+  }
   if (changes.status && changes.status !== wasStatus) task.completedAt = changes.status === 'Completed' ? new Date() : undefined;
   if (history.length) task.history.push(...history);
   await task.save();
@@ -123,9 +136,36 @@ exports.update = asyncHandler(async (req, res) => {
     if (completed) await notify([task.createdBy, task.assignedTo].filter((id) => id && String(id) !== String(req.user._id)), { type: 'TASK_COMPLETED', title: 'Task completed', message: `${req.user.name} completed "${task.title}".`, link: '/tasks' });
     else if (history.length && task.assignedTo && String(task.assignedTo) !== String(req.user._id)) await notify(task.assignedTo, { type: 'TASK_UPDATED', title: 'Task updated', message: `${req.user.name} updated "${task.title}".`, link: '/tasks' });
   }
+  // Completing a repeating task creates the next occurrence (cancelling it ends the series).
+  const nextTask = completed ? await spawnNext(task, req.user) : null;
   await task.populate(POP);
-  res.json({ success: true, data: serialize(task, req.user) });
+  res.json({ success: true, data: serialize(task, req.user), nextTask: nextTask && { _id: nextTask._id, dueDate: nextTask.dueDate, dueHasTime: nextTask.dueHasTime } });
 });
+
+async function spawnNext(task, actor) {
+  if (!task.recurrence?.frequency || task.recurrence.frequency === 'none') return null;
+  const due = nextOccurrence(task);
+  if (!due) return null; // series ended
+  // Atomic claim: only the first completion of this task may create a next occurrence, even if it is reopened and completed again.
+  const claimed = await Task.findOneAndUpdate({ _id: task._id, recurrenceSpawned: { $ne: true } }, { recurrenceSpawned: true });
+  if (!claimed) return null;
+  const r = task.recurrence;
+  const next = await Task.create({
+    title: task.title, description: task.description, category: task.category, priority: task.priority, note: task.note,
+    createdBy: task.createdBy, owner: task.owner, organization: task.organization, assignedTo: task.assignedTo, assignedTeam: task.assignedTeam,
+    status: 'Pending', date: new Date(), dueDate: due, dueHasTime: task.dueHasTime,
+    recurrence: { frequency: r.frequency, interval: r.interval, endDate: r.endDate, anchor: r.anchor || task.dueDate },
+    seriesId: task.seriesId || task._id,
+  });
+  await activity.log({ actor, action: 'TASK_CREATED', message: `Next occurrence of repeating task "${task.title}" created`, organization: task.organization, entityType: 'Task', entityId: next._id });
+  if (task.organization) {
+    const people = [];
+    if (next.assignedTo) people.push(next.assignedTo);
+    if (next.assignedTeam) people.push(...(await User.find({ teams: next.assignedTeam }).select('_id').lean()).map((u) => u._id));
+    await notify(people.filter((id) => String(id) !== String(actor._id)), { type: 'TASK_ASSIGNED', title: 'Repeating task is due again', message: `"${next.title}" has a new occurrence.`, link: '/tasks' });
+  }
+  return next;
+}
 
 exports.remove = asyncHandler(async (req, res) => {
   const task = await findScoped(req.user, req.params.id);
