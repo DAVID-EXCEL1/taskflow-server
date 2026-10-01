@@ -11,8 +11,10 @@ const { ROLES, INVITE_STATUS, DEFAULT_CATEGORIES } = require('../config/constant
 const { getAccess } = require('../services/subscriptionService');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
+const { signChallenge } = require('../middleware/auth');
+const email = require('../services/emailService');
 
-const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, timezone: u.timezone || 'Africa/Lagos', role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
+const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, twoFactorEnabled: !!u.twoFactor?.enabled, timezone: u.timezone || 'Africa/Lagos', role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
 
 async function buildSession(userDoc) {
   const user = userDoc.toObject ? userDoc.toObject() : userDoc;
@@ -21,6 +23,7 @@ async function buildSession(userDoc) {
   return { user: publicUser(populated), access };
 }
 
+exports.buildSession = buildSession;
 exports.register = asyncHandler(async (req, res) => {
   const { accountType, name, email, password, inviteToken, organization } = req.body;
   if (await User.exists({ email })) throw new AppError('An account with this email already exists.', 409);
@@ -35,14 +38,14 @@ exports.register = asyncHandler(async (req, res) => {
     const org = await Organization.findById(invite.organization);
     await notify(org.owner, { type: 'INVITATION_ACCEPTED', title: 'Invitation accepted', message: `${name} joined ${org.name}.`, link: '/members' });
     await activity.log({ actor: user, action: 'MEMBER_JOINED', message: `${name} joined the organization`, organization: org._id, entityType: 'User', entityId: user._id });
-    return res.status(201).json({ success: true, token: signToken(user._id), ...(await buildSession(user)) });
+    return res.status(201).json({ success: true, token: signToken(user._id, user.role), ...(await buildSession(user)) });
   }
 
   if (accountType === 'PERSONAL') {
     const user = await User.create({ name, email, password, role: ROLES.INDIVIDUAL });
     await Category.insertMany(DEFAULT_CATEGORIES.map((c) => ({ ...c, user: user._id })));
     await activity.log({ actor: user, action: 'USER_REGISTERED', message: `${name} registered a personal account`, entityType: 'User', entityId: user._id });
-    return res.status(201).json({ success: true, token: signToken(user._id), ...(await buildSession(user)) });
+    return res.status(201).json({ success: true, token: signToken(user._id, user.role), ...(await buildSession(user)) });
   }
 
   // --- Business: user becomes Organization Owner ---
@@ -57,7 +60,7 @@ exports.register = asyncHandler(async (req, res) => {
     await User.deleteOne({ _id: user._id }); // roll back partial signup
     throw e;
   }
-  res.status(201).json({ success: true, token: signToken(user._id), ...(await buildSession(user)) });
+  res.status(201).json({ success: true, token: signToken(user._id, user.role), ...(await buildSession(user)) });
 });
 
 exports.login = asyncHandler(async (req, res) => {
@@ -65,9 +68,11 @@ exports.login = asyncHandler(async (req, res) => {
   // Same message for unknown email and wrong password.
   if (!user || !(await user.comparePassword(req.body.password))) throw new AppError('Incorrect email or password.', 401);
   if (!user.isActive) throw new AppError('This account has been deactivated. Contact support.', 403);
+  // Password is correct. If 2FA is on, no session yet: the client must send the code to /auth/login/2fa.
+  if (user.twoFactor?.enabled) return res.json({ success: true, twoFactorRequired: true, challengeToken: signChallenge(user._id) });
   user.lastLoginAt = new Date();
   await user.save();
-  res.json({ success: true, token: signToken(user._id), ...(await buildSession(user)) });
+  res.json({ success: true, token: signToken(user._id, user.role), ...(await buildSession(user)) });
 });
 
 exports.me = asyncHandler(async (req, res) => res.json({ success: true, ...(await buildSession(req.user)) }));
@@ -81,6 +86,9 @@ exports.changePassword = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id).select('+password');
   if (!(await user.comparePassword(req.body.currentPassword))) throw new AppError('Current password is incorrect.', 400);
   user.password = req.body.newPassword;
+  user.passwordChangedAt = new Date(); // signs out every other session
   await user.save();
-  res.json({ success: true, message: 'Password updated.' });
+  const mail = email.templates.passwordChanged();
+  email.send({ to: user.email, ...mail }).catch(() => {});
+  res.json({ success: true, message: 'Password updated.', token: signToken(user._id, user.role) });
 });

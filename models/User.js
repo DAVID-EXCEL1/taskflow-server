@@ -13,6 +13,18 @@ const userSchema = new mongoose.Schema(
     organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', index: true },
     teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
     isActive: { type: Boolean, default: true },
+    passwordChangedAt: Date, // sessions issued before this are rejected
+    // Two-factor authentication. Secrets/recovery codes are never returned by default queries (select: false).
+    twoFactor: {
+      enabled: { type: Boolean, default: false },
+      enabledAt: Date,
+      secretEnc: { type: String, select: false },
+      pendingSecretEnc: { type: String, select: false },
+      recoveryHashes: { type: [String], select: false },
+      lastStep: { type: Number, select: false },
+      failedAttempts: { type: Number, select: false },
+      lockedUntil: { type: Date, select: false },
+    },
     lastLoginAt: Date,
   },
   { timestamps: true }

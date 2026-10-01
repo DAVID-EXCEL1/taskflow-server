@@ -4,6 +4,10 @@ const Subscription = require('../models/Subscription');
 const Payment = require('../models/Payment');
 const Setting = require('../models/Setting');
 const ProofFile = require('../models/ProofFile');
+const User = require('../models/User');
+const email = require('../services/emailService');
+const { notifyAdmins } = require('../services/notificationService');
+const activity = require('../services/activityService');
 const AppError = require('../utils/AppError');
 const asyncHandler = require('../utils/asyncHandler');
 const { ROLES, PLANS } = require('../config/constants');
@@ -89,7 +93,16 @@ exports.getPaymentInfo = asyncHandler(async (req, res) => {
   res.json({ success: true, data: s?.value || null });
 });
 exports.setPaymentInfo = asyncHandler(async (req, res) => {
+  const before = (await Setting.findOne({ key: 'payment' }).lean())?.value || null;
   const s = await Setting.findOneAndUpdate({ key: 'payment' }, { value: req.body, updatedBy: req.user._id }, { upsert: true, new: true });
+  // Swapping the account customers pay into is the highest-impact admin action, so every admin is alerted.
+  if (!before || before.accountNumber !== req.body.accountNumber || before.bankName !== req.body.bankName || before.accountName !== req.body.accountName) {
+    await activity.log({ actor: req.user, action: 'PAYMENT_DETAILS_CHANGED', message: 'Changed the payment (bank) details', entityType: 'Setting' });
+    await notifyAdmins({ type: 'PAYMENT_DETAILS_CHANGED', title: 'Payment details changed', message: `${req.user.name} changed the bank details customers pay into.`, link: '/admin/settings' });
+    const admins = await User.find({ role: 'SUPER_ADMIN', isActive: true }).select('email').lean();
+    const tpl = email.templates.paymentDetailsChanged({ actor: req.user.name, before, after: req.body });
+    admins.forEach((a) => email.send({ to: a.email, ...tpl }).catch(() => {}));
+  }
   res.json({ success: true, data: s.value, message: 'Payment details saved.' });
 });
 

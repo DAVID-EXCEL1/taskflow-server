@@ -59,6 +59,11 @@ const paymentInfo = z.object({
   instructions: optStr(500),
 });
 const status = z.object({ isActive: z.boolean() });
+const forgotPassword = z.object({ email });
+const resetPassword = z.object({ token: z.string().min(32).max(200), password });
+const login2fa = z.object({ challengeToken: z.string().min(10).max(2000), code: z.string().trim().min(6).max(20) });
+const code2fa = z.object({ code: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code') });
+const disable2fa = z.object({ password: z.string().min(1, 'Enter your password'), code: z.string().trim().min(6).max(20) });
 // Push endpoints must belong to a real browser push service (the server POSTs to this URL, so arbitrary hosts would be an SSRF risk).
 const PUSH_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(googleapis\.com|mozilla\.com|push\.apple\.com|notify\.windows\.com)\//i;
 const pushSubscription = z.object({
@@ -67,4 +72,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };

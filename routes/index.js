@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
-const { protect, authorize } = require('../middleware/auth');
+const { protect, authorize, requireTwoFactor } = require('../middleware/auth');
 const { requirePermission } = require('../config/permissions');
 const { requireActiveSubscription: writable } = require('../middleware/subscriptionGuard');
 const validate = require('../middleware/validate');
@@ -17,8 +17,10 @@ const billing = require('../controllers/billingController');
 const misc = require('../controllers/miscController');
 const dash = require('../controllers/dashboardController');
 const pushCtl = require('../controllers/pushController');
+const security = require('../controllers/securityController');
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many attempts. Try again in a few minutes.' } });
+const forgotLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many requests. Try again in a few minutes.' } });
 const { SUPER_ADMIN, ORGANIZATION_OWNER, ORGANIZATION_MEMBER, INDIVIDUAL } = ROLES;
 const orgUsers = authorize(ORGANIZATION_OWNER, ORGANIZATION_MEMBER);
 const ownerOnly = authorize(ORGANIZATION_OWNER);
@@ -29,6 +31,9 @@ router.get('/health', (req, res) => res.json({ ok: true }));
 router.get('/plans', billing.plans);
 router.post('/auth/register', authLimiter, validate(v.register), auth.register);
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);
+router.post('/auth/login/2fa', authLimiter, validate(v.login2fa), security.login2fa);
+router.post('/auth/forgot-password', forgotLimiter, validate(v.forgotPassword), security.forgotPassword);
+router.post('/auth/reset-password', authLimiter, validate(v.resetPassword), security.resetPassword);
 router.get('/invitations/token/:token', orgs.inviteByToken);
 router.get('/cron/run', pushCtl.cron);   // secured by CRON_SECRET, for an external scheduler
 router.post('/cron/run', pushCtl.cron);
@@ -37,7 +42,10 @@ router.post('/cron/run', pushCtl.cron);
 router.use(protect);
 router.get('/auth/me', auth.me);
 router.put('/auth/profile', validate(v.profile), auth.updateProfile);          // allowed while read-only
-router.put('/auth/password', validate(v.changePassword), auth.changePassword);
+router.put('/auth/password', authLimiter, validate(v.changePassword), auth.changePassword);
+router.post('/auth/2fa/setup', authLimiter, security.setup2fa);
+router.post('/auth/2fa/enable', authLimiter, validate(v.code2fa), security.enable2fa);
+router.post('/auth/2fa/disable', authLimiter, validate(v.disable2fa), security.disable2fa);
 
 router.get('/dashboard', dash.get);
 router.get('/push/config', pushCtl.config);
@@ -68,7 +76,7 @@ router.get('/organizations', adminOnly, orgs.adminList);
 router.get('/organizations/me', orgUsers, orgs.getMine);
 router.put('/organizations/me', ownerOnly, writable, validate(v.org), orgs.updateMine);
 router.get('/organizations/:id', adminOnly, orgs.adminGet);
-router.patch('/organizations/:id/status', adminOnly, validate(v.status), orgs.adminSetStatus);
+router.patch('/organizations/:id/status', adminOnly, requireTwoFactor, validate(v.status), orgs.adminSetStatus);
 
 router.get('/members', orgUsers, orgs.listMembers);
 router.put('/members/:id/teams', ownerOnly, writable, validate(v.memberTeams), orgs.setMemberTeams);
@@ -88,7 +96,7 @@ router.post('/invitations/token/:token/reject', orgs.rejectInvite);
 // Users (Super Admin)
 router.get('/users', adminOnly, admin.listUsers);
 router.get('/users/:id', adminOnly, admin.getUser);
-router.patch('/users/:id/status', adminOnly, validate(v.status), admin.setUserStatus);
+router.patch('/users/:id/status', adminOnly, requireTwoFactor, validate(v.status), admin.setUserStatus);
 
 // Subscriptions & payments
 router.get('/subscriptions', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), billing.listSubscriptions);
@@ -97,9 +105,9 @@ router.post('/subscriptions/run-checks', adminOnly, billing.runChecks);
 router.get('/payments', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), billing.listPayments);
 router.post('/payments', requirePermission('payments:submit'), upload.single('proof'), validate(v.payment), billing.submitPayment);
 router.get('/payments/:id/proof', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWNER), billing.proof);
-router.post('/payments/:id/approve', adminOnly, billing.approve);
-router.post('/payments/:id/reject', adminOnly, validate(v.reject), billing.reject);
+router.post('/payments/:id/approve', adminOnly, requireTwoFactor, billing.approve);
+router.post('/payments/:id/reject', adminOnly, requireTwoFactor, validate(v.reject), billing.reject);
 router.get('/settings/payment', billing.getPaymentInfo);
-router.put('/settings/payment', adminOnly, validate(v.paymentInfo), billing.setPaymentInfo);
+router.put('/settings/payment', adminOnly, requireTwoFactor, validate(v.paymentInfo), billing.setPaymentInfo);
 
 module.exports = router;
