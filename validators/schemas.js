@@ -1,5 +1,6 @@
 const { z } = require('zod');
 const { TASK_PRIORITIES, TASK_STATUSES } = require('../config/constants');
+const { isValidTimezone } = require('../utils/timezone');
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'Invalid id');
 const optId = z.preprocess((v) => (v === '' ? null : v), objectId.nullable().optional());
@@ -23,10 +24,12 @@ const register = z.object({
 }).refine((d) => d.inviteToken || d.accountType !== 'BUSINESS' || d.organization, { message: 'Organization details are required', path: ['organization'] });
 
 const login = z.object({ email, password: z.string().min(1, 'Password is required') });
-const profile = z.object({ name: z.string().trim().min(2).max(80).optional(), phone: optStr(30) });
+const profile = z.object({ name: z.string().trim().min(2).max(80).optional(), phone: optStr(30), timezone: z.string().refine(isValidTimezone, 'Unknown timezone').optional() });
 const changePassword = z.object({ currentPassword: z.string().min(1), newPassword: password });
 
 const recurrence = z.object({ frequency: z.enum(['none', 'daily', 'weekly', 'monthly', 'yearly']), interval: z.coerce.number().int().min(1, 'Repeat interval must be at least 1').max(365).default(1), endDate: optDate }).optional();
+
+const reminder = z.object({ minutesBefore: z.preprocess((v) => (v === '' ? null : v), z.coerce.number().int().min(0).max(10080).nullable()) }).optional();
 
 const task = z.object({
   title: z.string().trim().min(1, 'Title is required').max(200),
@@ -34,7 +37,7 @@ const task = z.object({
   category: optId, assignedTo: optId, assignedTeam: optId,
   priority: z.enum(TASK_PRIORITIES).optional(),
   status: z.enum(TASK_STATUSES).optional(),
-  date: optDate, dueDate: optDate, dueHasTime: z.boolean().optional(), recurrence,
+  date: optDate, dueDate: optDate, dueHasTime: z.boolean().optional(), recurrence, reminder,
 });
 const taskUpdate = task.partial();
 
@@ -56,5 +59,12 @@ const paymentInfo = z.object({
   instructions: optStr(500),
 });
 const status = z.object({ isActive: z.boolean() });
+// Push endpoints must belong to a real browser push service (the server POSTs to this URL, so arbitrary hosts would be an SSRF risk).
+const PUSH_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(googleapis\.com|mozilla\.com|push\.apple\.com|notify\.windows\.com)\//i;
+const pushSubscription = z.object({
+  endpoint: z.string().max(1000).refine((u) => PUSH_HOSTS.test(u), 'Unsupported push service'),
+  keys: z.object({ p256dh: z.string().min(10).max(200), auth: z.string().min(5).max(100) }),
+});
+const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint };

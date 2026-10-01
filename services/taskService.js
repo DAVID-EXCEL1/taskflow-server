@@ -4,7 +4,7 @@ const User = require('../models/User');
 const AppError = require('../utils/AppError');
 const { ROLES } = require('../config/constants');
 
-const ALL_FIELDS = ['title', 'description', 'category', 'priority', 'status', 'date', 'dueDate', 'dueHasTime', 'note', 'assignedTo', 'assignedTeam', 'recurrence'];
+const ALL_FIELDS = ['title', 'description', 'category', 'priority', 'status', 'date', 'dueDate', 'dueHasTime', 'note', 'assignedTo', 'assignedTeam', 'recurrence', 'reminder'];
 const ASSIGNEE_FIELDS = ['status', 'note'];
 
 // Query filter limiting tasks to what this user may SEE.

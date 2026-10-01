@@ -6,6 +6,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const { escapeRegex, pageParams } = require('../utils/helpers');
 const { ROLES } = require('../config/constants');
 const { nextOccurrence } = require('../utils/recurrence');
+const { applyReminder } = require('../services/taskReminderService');
+const OPEN = ['Pending', 'In Progress'];
 const svc = require('../services/taskService');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
@@ -83,8 +85,11 @@ exports.create = asyncHandler(async (req, res) => {
     if (!doc.dueDate) throw new AppError('Set a due date to make a task repeat.', 400);
     doc.recurrence = { ...doc.recurrence, anchor: doc.dueDate };
   } else delete doc.recurrence;
+  if (doc.reminder?.minutesBefore == null) delete doc.reminder;
+  else if (!doc.dueDate) throw new AppError('Set a due date to get a reminder.', 400);
   if (doc.status === 'Completed') doc.completedAt = new Date();
   const task = await Task.create(doc);
+  if (task.reminder?.minutesBefore != null) { applyReminder(task, req.user.timezone); await task.save(); }
   if (task.recurrence?.frequency && task.recurrence.frequency !== 'none') { task.seriesId = task._id; await task.save(); }
 
   await activity.log({ actor: req.user, action: 'TASK_CREATED', message: `Created task "${task.title}"`, organization: task.organization, entityType: 'Task', entityId: task._id });
@@ -125,6 +130,10 @@ exports.update = asyncHandler(async (req, res) => {
     }
   }
   if (changes.status && changes.status !== wasStatus) task.completedAt = changes.status === 'Completed' ? new Date() : undefined;
+  if (task.reminder?.minutesBefore != null && !task.dueDate) throw new AppError('Set a due date to get a reminder.', 400);
+  // Recompute the reminder only when it, the due date, or open/closed state changed (so a status tweak never re-sends it).
+  const openFlip = 'status' in changes && OPEN.includes(changes.status) !== OPEN.includes(wasStatus);
+  if ('reminder' in changes || 'dueDate' in changes || 'dueHasTime' in changes || openFlip) applyReminder(task, req.user.timezone);
   if (history.length) task.history.push(...history);
   await task.save();
 
@@ -156,7 +165,9 @@ async function spawnNext(task, actor) {
     status: 'Pending', date: new Date(), dueDate: due, dueHasTime: task.dueHasTime,
     recurrence: { frequency: r.frequency, interval: r.interval, endDate: r.endDate, anchor: r.anchor || task.dueDate },
     seriesId: task.seriesId || task._id,
+    reminder: task.reminder?.minutesBefore != null ? { minutesBefore: task.reminder.minutesBefore } : undefined,
   });
+  if (next.reminder?.minutesBefore != null) { applyReminder(next, actor.timezone); await next.save(); }
   await activity.log({ actor, action: 'TASK_CREATED', message: `Next occurrence of repeating task "${task.title}" created`, organization: task.organization, entityType: 'Task', entityId: next._id });
   if (task.organization) {
     const people = [];

@@ -1,24 +1,24 @@
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { ROLES } = require('../config/constants');
+const push = require('./pushService');
 
 /**
- * Delivery channels. Add an email channel here later, e.g.
- *   channels.push(async (userIds, payload) => sendEmail(...))
- * and every notify() call will use it automatically.
+ * Delivery channels. Every notify() call goes through all of them.
+ * To add email later, push another function onto `channels`.
  */
 const inApp = async (userIds, payload) => {
   if (!userIds.length) return;
   await Notification.insertMany(userIds.map((user) => ({ user, ...payload })));
 };
-const channels = [inApp];
+const browserPush = async (userIds, payload) => { await push.sendToUsers(userIds, payload); };
+const channels = [inApp, browserPush];
 
 async function notify(userIds, payload) {
-  try {
-    const ids = [...new Set((Array.isArray(userIds) ? userIds : [userIds]).filter(Boolean).map(String))];
-    for (const channel of channels) await channel(ids, payload);
-  } catch (e) {
-    console.error('Notification failed:', e.message);
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : [userIds]).filter(Boolean).map(String))];
+  if (!ids.length) return;
+  for (const channel of channels) {
+    try { await channel(ids, payload); } catch (e) { console.error('Notification channel failed:', e.message); }
   }
 }
 async function notifyAdmins(payload) {

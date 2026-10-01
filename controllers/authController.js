@@ -12,7 +12,7 @@ const { getAccess } = require('../services/subscriptionService');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
 
-const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
+const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, timezone: u.timezone || 'Africa/Lagos', role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
 
 async function buildSession(userDoc) {
   const user = userDoc.toObject ? userDoc.toObject() : userDoc;

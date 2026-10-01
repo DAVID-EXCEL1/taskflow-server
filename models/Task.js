@@ -33,6 +33,10 @@ const schema = new mongoose.Schema(
       anchor: Date,
     },
     seriesId: { type: mongoose.Schema.Types.ObjectId, index: true },
+    // Reminders: minutesBefore (null = none). remindAt is computed by the server; reminderSent prevents repeats.
+    reminder: { minutesBefore: { type: Number, min: 0, max: 10080 } },
+    remindAt: { type: Date, index: true },
+    reminderSent: { type: Boolean, default: false },
     recurrenceSpawned: { type: Boolean, default: false }, // guards against creating the next occurrence twice
     history: [historySchema],
   },

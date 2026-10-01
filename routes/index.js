@@ -16,6 +16,7 @@ const admin = require('../controllers/adminController');
 const billing = require('../controllers/billingController');
 const misc = require('../controllers/miscController');
 const dash = require('../controllers/dashboardController');
+const pushCtl = require('../controllers/pushController');
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many attempts. Try again in a few minutes.' } });
 const { SUPER_ADMIN, ORGANIZATION_OWNER, ORGANIZATION_MEMBER, INDIVIDUAL } = ROLES;
@@ -29,6 +30,8 @@ router.get('/plans', billing.plans);
 router.post('/auth/register', authLimiter, validate(v.register), auth.register);
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);
 router.get('/invitations/token/:token', orgs.inviteByToken);
+router.get('/cron/run', pushCtl.cron);   // secured by CRON_SECRET, for an external scheduler
+router.post('/cron/run', pushCtl.cron);
 
 // ---- Everything below requires login ----
 router.use(protect);
@@ -37,6 +40,10 @@ router.put('/auth/profile', validate(v.profile), auth.updateProfile);          /
 router.put('/auth/password', validate(v.changePassword), auth.changePassword);
 
 router.get('/dashboard', dash.get);
+router.get('/push/config', pushCtl.config);
+router.post('/push/subscribe', validate(v.pushSubscription), pushCtl.subscribe);
+router.post('/push/unsubscribe', validate(v.pushEndpoint), pushCtl.unsubscribe);
+router.post('/push/test', pushCtl.test);
 router.get('/notifications', misc.listNotifications);
 router.post('/notifications/read-all', misc.markAllRead);
 router.patch('/notifications/:id/read', misc.markRead);
