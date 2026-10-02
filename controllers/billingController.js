@@ -4,6 +4,7 @@ const Subscription = require('../models/Subscription');
 const Payment = require('../models/Payment');
 const Setting = require('../models/Setting');
 const ProofFile = require('../models/ProofFile');
+const storage = require('../services/storageService');
 const User = require('../models/User');
 const email = require('../services/emailService');
 const { notifyAdmins } = require('../services/notificationService');
@@ -68,6 +69,10 @@ exports.proof = asyncHandler(async (req, res) => {
   if (!payment?.proof?.mimeType) throw new AppError('No proof was uploaded for this payment.', 404);
   res.setHeader('Content-Type', payment.proof.mimeType);
   res.setHeader('Content-Disposition', 'inline');
+  if (payment.proof.cloudinary?.publicId) {
+    try { return res.send(await storage.downloadReceipt(payment.proof.cloudinary)); }
+    catch (e) { console.error('Receipt download failed:', e.message); throw new AppError('Could not load this receipt from storage. Please try again.', 502); }
+  }
   const stored = await ProofFile.findOne({ payment: payment._id });
   if (stored) return res.send(stored.data);
   // Legacy: files saved on disk before proofs moved to MongoDB (lost if the server's disk was reset).

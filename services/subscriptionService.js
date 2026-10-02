@@ -3,6 +3,7 @@ const Payment = require('../models/Payment');
 const Organization = require('../models/Organization');
 const AppError = require('../utils/AppError');
 const ProofFile = require('../models/ProofFile');
+const storage = require('./storageService');
 const { hasValidSignature } = require('../utils/fileSignature');
 const { addMonths, daysBetween } = require('../utils/helpers');
 const { ROLES, PLANS, SUB_STATUS, PAYMENT_STATUS, RENEWAL_WINDOW_DAYS } = require('../config/constants');
@@ -85,12 +86,13 @@ async function submitPayment(user, body, file) {
     throw new AppError('You already have a payment awaiting approval.', 409);
   }
 
+  const stored = file ? await storage.storeReceipt(file) : null; // Cloudinary, or null -> database fallback below
   const payment = await Payment.create({
     ...subject, plan: planKey, amount: plan.price, submittedBy: user._id,
     paymentDate: body.paymentDate, reference: body.reference, description: body.description,
-    proof: file ? { originalName: file.originalname, mimeType: file.mimetype, size: file.size } : undefined,
+    proof: file ? { originalName: file.originalname, mimeType: file.mimetype, size: file.size, cloudinary: stored?.cloudinary } : undefined,
   });
-  if (file) await ProofFile.create({ payment: payment._id, data: file.buffer, mimeType: file.mimetype, originalName: file.originalname, size: file.size });
+  if (file && !stored) await ProofFile.create({ payment: payment._id, data: file.buffer, mimeType: file.mimetype, originalName: file.originalname, size: file.size });
   const sub = await Subscription.create({ ...subject, plan: planKey, amount: plan.price, status: SUB_STATUS.PENDING, payment: payment._id });
   payment.subscription = sub._id;
   await payment.save();
