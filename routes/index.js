@@ -18,6 +18,7 @@ const misc = require('../controllers/miscController');
 const dash = require('../controllers/dashboardController');
 const pushCtl = require('../controllers/pushController');
 const security = require('../controllers/securityController');
+const aiCtl = require('../controllers/aiController');
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many attempts. Try again in a few minutes.' } });
 const forgotLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many requests. Try again in a few minutes.' } });
@@ -108,6 +109,9 @@ router.get('/payments/:id/proof', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATIO
 router.post('/payments/:id/approve', adminOnly, requireTwoFactor, billing.approve);
 router.post('/payments/:id/reject', adminOnly, requireTwoFactor, validate(v.reject), billing.reject);
 router.get('/settings/payment', billing.getPaymentInfo);
+router.get('/settings/ai', adminOnly, aiCtl.status);
+router.put('/settings/ai', adminOnly, validate(v.aiSwitch), aiCtl.setEnabled);
+router.post('/settings/ai/test', adminOnly, authLimiter, aiCtl.test);
 router.put('/settings/payment', adminOnly, requireTwoFactor, validate(v.paymentInfo), billing.setPaymentInfo);
 
 module.exports = router;
