@@ -7,7 +7,8 @@ const Team = require('../models/Team');
 const AppError = require('../utils/AppError');
 const asyncHandler = require('../utils/asyncHandler');
 const { signToken } = require('../middleware/auth');
-const { ROLES, INVITE_STATUS, DEFAULT_CATEGORIES } = require('../config/constants');
+const { ROLES, INVITE_STATUS, DEFAULT_CATEGORIES, TERMS_VERSION } = require('../config/constants');
+const terms = () => ({ termsAcceptedAt: new Date(), termsVersion: TERMS_VERSION });
 const { getAccess } = require('../services/subscriptionService');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
@@ -33,7 +34,7 @@ exports.register = asyncHandler(async (req, res) => {
     const invite = await Invitation.findOne({ token: inviteToken, status: INVITE_STATUS.PENDING });
     if (!invite || invite.expiresAt < new Date()) throw new AppError('This invitation is invalid or has expired.', 400);
     if (invite.email !== email) throw new AppError(`This invitation was sent to ${invite.email}. Register with that email address.`, 400);
-    const user = await User.create({ name, email, password, role: ROLES.ORGANIZATION_MEMBER, organization: invite.organization, teams: invite.team ? [invite.team] : [] });
+    const user = await User.create({ name, email, password, role: ROLES.ORGANIZATION_MEMBER, organization: invite.organization, teams: invite.team ? [invite.team] : [], ...terms() });
     invite.status = INVITE_STATUS.ACCEPTED; invite.respondedAt = new Date(); await invite.save();
     const org = await Organization.findById(invite.organization);
     await notify(org.owner, { type: 'INVITATION_ACCEPTED', title: 'Invitation accepted', message: `${name} joined ${org.name}.`, link: '/members' });
@@ -42,14 +43,14 @@ exports.register = asyncHandler(async (req, res) => {
   }
 
   if (accountType === 'PERSONAL') {
-    const user = await User.create({ name, email, password, role: ROLES.INDIVIDUAL });
+    const user = await User.create({ name, email, password, role: ROLES.INDIVIDUAL, ...terms() });
     await Category.insertMany(DEFAULT_CATEGORIES.map((c) => ({ ...c, user: user._id })));
     await activity.log({ actor: user, action: 'USER_REGISTERED', message: `${name} registered a personal account`, entityType: 'User', entityId: user._id });
     return res.status(201).json({ success: true, token: signToken(user._id, user.role), ...(await buildSession(user)) });
   }
 
   // --- Business: user becomes Organization Owner ---
-  const user = await User.create({ name, email, password, role: ROLES.ORGANIZATION_OWNER });
+  const user = await User.create({ name, email, password, role: ROLES.ORGANIZATION_OWNER, ...terms() });
   try {
     const org = await Organization.create({ ...organization, owner: user._id });
     user.organization = org._id;

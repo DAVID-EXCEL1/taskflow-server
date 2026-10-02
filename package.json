@@ -9,7 +9,9 @@
     "seed": "node seed.js",
     "seed:reset": "node seed.js --reset",
     "vapid": "web-push generate-vapid-keys",
-    "reset-2fa": "node scripts/reset-2fa.js"
+    "reset-2fa": "node scripts/reset-2fa.js",
+    "seed:admin": "node seed.js --admin-only",
+    "clean-demo": "node scripts/clean-demo.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

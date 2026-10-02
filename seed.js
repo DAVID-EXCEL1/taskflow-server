@@ -24,12 +24,23 @@ async function activeSub(subject, plan, startOffsetDays) {
 }
 
 async function main() {
+  // --reset deletes EVERYTHING. Never let it run on a live database by accident.
+  if (process.argv.includes('--reset') && process.env.NODE_ENV === 'production' && !process.argv.includes('--i-understand-this-deletes-everything')) {
+    console.error('Refusing to run --reset with NODE_ENV=production. It deletes ALL data. If you really mean it, add --i-understand-this-deletes-everything');
+    process.exit(1);
+  }
   await connectDB();
   if (process.argv.includes('--reset')) await reset();
   else if (await User.exists({ role: ROLES.SUPER_ADMIN })) { console.log('Already seeded. Use "npm run seed:reset" to wipe and reseed.'); return process.exit(0); }
 
   const admin = await User.create({ name: process.env.SEED_ADMIN_NAME || 'Platform Owner', email: (process.env.SEED_ADMIN_EMAIL || 'admin@taskdesk.local').toLowerCase(), password: process.env.SEED_ADMIN_PASSWORD || 'ChangeMe123!', role: ROLES.SUPER_ADMIN });
   await Setting.create({ key: 'payment', value: { bankName: 'Your Bank Name', accountName: 'Your Account Name', accountNumber: '0123456789', instructions: 'Use your registered email as the transfer narration.' }, updatedBy: admin._id });
+
+  if (process.argv.includes('--admin-only')) {
+    console.log(`\nSeed complete (Super Admin only, no demo data).\nSuper Admin: ${admin.email}\nNext: log in, turn on two-factor, and enter your real bank details under Payment details.`);
+    await mongoose.disconnect();
+    return;
+  }
 
   // --- Individuals ---
   const david = await User.create({ name: 'David Okafor', email: 'david@demo.com', password: DEMO_PASSWORD, role: ROLES.INDIVIDUAL });

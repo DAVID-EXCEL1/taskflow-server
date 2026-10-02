@@ -21,6 +21,7 @@ const register = z.object({
   email, password,
   inviteToken: z.string().optional(),
   organization: z.object(orgFields).optional(),
+  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
 }).refine((d) => d.inviteToken || d.accountType !== 'BUSINESS' || d.organization, { message: 'Organization details are required', path: ['organization'] });
 
 const login = z.object({ email, password: z.string().min(1, 'Password is required') });

@@ -37,7 +37,9 @@ const DEFAULT_CATEGORIES = [
   { name: 'Health', color: '#D64545' },
 ];
 const REMINDER_DAYS = [7, 3, 1];
+// Bump when the Terms/Privacy change materially (keep in sync with client/src/config/legal.js).
+const TERMS_VERSION = '2026-10-01';
 // Renewal opens this many days before expiry (set to 0 to allow renewal only after expiry).
 const RENEWAL_WINDOW_DAYS = 7;
 
-module.exports = { ROLES, PLANS, TASK_PRIORITIES, TASK_STATUSES, SUB_STATUS, PAYMENT_STATUS, INVITE_STATUS, DEFAULT_CATEGORIES, REMINDER_DAYS, RENEWAL_WINDOW_DAYS };
+module.exports = { ROLES, PLANS, TASK_PRIORITIES, TASK_STATUSES, SUB_STATUS, PAYMENT_STATUS, INVITE_STATUS, DEFAULT_CATEGORIES, REMINDER_DAYS, RENEWAL_WINDOW_DAYS, TERMS_VERSION };
