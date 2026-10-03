@@ -53,6 +53,7 @@ router.post('/auth/2fa/disable', authLimiter, validate(v.disable2fa), security.d
 router.get('/dashboard', dash.get);
 router.get('/ai/me', authorize(INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), planCtl.me);
 router.put('/ai/me', authorize(INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), validate(v.aiOptIn), planCtl.setOptIn);
+router.post('/ai/draft-tasks', authorize(INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), aiUserLimiter, validate(v.aiDraft), planCtl.draftTasks);
 router.post('/ai/plan-day', authorize(INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), aiUserLimiter, planCtl.planDay);
 router.get('/push/config', pushCtl.config);
 router.post('/push/subscribe', validate(v.pushSubscription), pushCtl.subscribe);

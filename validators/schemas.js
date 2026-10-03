@@ -61,6 +61,7 @@ const paymentInfo = z.object({
 });
 const status = z.object({ isActive: z.boolean() });
 const aiSwitch = z.object({ enabled: z.boolean() });
+const aiDraft = z.object({ prompt: z.string().trim().min(3, 'Describe what you need to do').max(600, 'Please keep it under 600 characters') });
 const aiOptIn = z.object({ enabled: z.boolean() });
 const forgotPassword = z.object({ email });
 const resetPassword = z.object({ token: z.string().min(32).max(200), password });
@@ -75,4 +76,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, aiSwitch, aiOptIn, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };

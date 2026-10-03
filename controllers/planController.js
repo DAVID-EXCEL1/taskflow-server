@@ -5,6 +5,8 @@ const asyncHandler = require('../utils/asyncHandler');
 const ai = require('../services/aiService');
 const quota = require('../services/aiQuota');
 const plan = require('../services/planService');
+const draft = require('../services/draftService');
+const Category = require('../models/Category');
 const { buildScope } = require('../services/taskService');
 const { getAccess } = require('../services/subscriptionService');
 const { ROLES } = require('../config/constants');
@@ -59,4 +61,28 @@ exports.planDay = asyncHandler(async (req, res) => {
     out.aiNote = 'unavailable';
   }
   res.json({ success: true, data: out });
+});
+
+// AI assistant: drafts tasks from a request. Creates NOTHING - the client shows a preview and the user confirms.
+exports.draftTasks = asyncHandler(async (req, res) => {
+  const s = await standing(req.user);
+  if (!s.optedIn) throw new AppError('Turn on AI suggestions in your profile first.', 403, { code: 'AI_OPT_IN' });
+  if (!(await getAccess(req.user)).canWrite) throw new AppError('The AI assistant needs an active subscription.', 402, { code: 'READ_ONLY' });
+  const st = await ai.status();
+  if (!st.configured || !st.enabled || st.circuitOpen) throw new ai.AiUnavailableError(!st.enabled ? 'disabled' : st.circuitOpen ? 'circuit_open' : 'not_configured');
+  const q = await quota.consume(req.user._id, s.limit);
+  if (!q.ok) throw new AppError(q.why === 'global' ? 'The AI assistant has reached its limit for today across the platform. Please try again tomorrow, or use Smart add in the task row.' : "You've used today's AI suggestions. They reset tomorrow. Smart add in the task row still works.", 429, { code: 'AI_LIMIT' });
+
+  let drafts;
+  try {
+    const cats = await Category.find(s.isIndividual ? { user: req.user._id } : { organization: req.user.organization }).select('name').limit(30).lean();
+    const names = cats.map((c) => c.name);
+    const text = await ai.chat({ messages: draft.buildMessages(req.body.prompt, names, { tz: req.user.timezone || DEFAULT_TZ }), maxTokens: 1000, temperature: 0.3, timeoutMs: 20000 });
+    drafts = draft.parseDrafts(text, names);
+    if (!drafts.length) throw new AppError('I could not turn that into tasks. Try saying what you need to do and when, for example: "Pay rent on 1 November and call the landlord on Friday".', 422, { code: 'AI_NO_TASKS' });
+  } catch (e) {
+    await quota.refund(req.user._id); // a failed attempt never costs the user a use
+    throw e;
+  }
+  res.json({ success: true, data: { drafts, remaining: q.remaining } });
 });

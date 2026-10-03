@@ -90,14 +90,14 @@ function release() {
 }
 
 /** Sends chat messages, returns the reply text. Throws AiUnavailableError for ANY problem. */
-async function chat({ messages, maxTokens = 400, temperature = 0.3 }) {
+async function chat({ messages, maxTokens = 400, temperature = 0.3, timeoutMs }) {
   if (!(await switchOn())) throw new AiUnavailableError('disabled');
   if (!configured()) throw new AiUnavailableError('not_configured');
   if (Date.now() < breaker.openUntil) throw new AiUnavailableError('circuit_open');
   await acquire();
   const c = cfg();
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), c.timeoutMs);
+  const timer = setTimeout(() => ctrl.abort(), Math.min(timeoutMs || c.timeoutMs, 30000));
   try {
     const res = await fetch(`${c.baseUrl}/chat/completions`, {
       method: 'POST',
