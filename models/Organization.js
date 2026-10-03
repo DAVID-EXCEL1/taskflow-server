@@ -8,6 +8,7 @@ const schema = new mongoose.Schema(
     website: { type: String, trim: true },
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     isActive: { type: Boolean, default: true },
+    aiEnabled: { type: Boolean, default: false }, // set by the owner; covers the whole organization
   },
   { timestamps: true }
 );

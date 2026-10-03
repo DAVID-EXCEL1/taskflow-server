@@ -37,6 +37,21 @@ const cfg = () => ({
 });
 const configured = () => { const c = cfg(); return !!(c.baseUrl && c.model); };
 
+// "Reasoning" models (e.g. gpt-oss) spend tokens thinking before they answer. Ask for low effort and leave headroom,
+// otherwise a small max_tokens is eaten by the thinking and the reply comes back empty. AI_REASONING_EFFORT=none turns this off.
+function reasoningEffort() {
+  const v = String(process.env.AI_REASONING_EFFORT || '').toLowerCase();
+  if (v === 'none') return null;
+  if (v) return v;
+  return /gpt-oss/i.test(process.env.AI_MODEL || '') ? 'low' : null;
+}
+const REASONING_HEADROOM = 300;
+
+// Last problem, for the admin screen only. Never contains prompts or keys.
+let lastError = null;
+const redact = (s) => String(s || '').replace(/(gsk_|sk-|re_|key-)[A-Za-z0-9._-]{6,}/gi, '[redacted]').replace(/Bearer\s+\S+/gi, 'Bearer [redacted]').replace(/\s+/g, ' ').slice(0, 200);
+const note = (reason, status, detail) => { lastError = { reason, status: status || null, detail: detail ? redact(detail) : null, at: new Date().toISOString() }; };
+
 /* ---- kill switch (environment + admin toggle in the database, cached 20s) ---- */
 let switchCache = { at: 0, enabled: true };
 async function switchOn() {
@@ -87,19 +102,32 @@ async function chat({ messages, maxTokens = 400, temperature = 0.3 }) {
     const res = await fetch(`${c.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(c.key ? { Authorization: `Bearer ${c.key}` } : {}) },
-      body: JSON.stringify({ model: c.model, messages, max_tokens: maxTokens, temperature, stream: false }),
+      body: JSON.stringify({ model: c.model, messages, max_tokens: Math.min(maxTokens + (reasoningEffort() ? REASONING_HEADROOM : 0), 2000), temperature, stream: false, ...(reasoningEffort() ? { reasoning_effort: reasoningEffort() } : {}) }),
       signal: ctrl.signal,
     });
-    if (!res.ok) { failed(); console.error(`AI provider error: HTTP ${res.status}`); throw new AiUnavailableError('upstream'); }
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      failed(); note('upstream', res.status, body?.error?.message || body?.message);
+      console.error(`AI provider error: HTTP ${res.status}`);
+      throw new AiUnavailableError('upstream');
+    }
     const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content;
-    if (typeof text !== 'string' || !text.trim()) { failed(); console.error('AI provider returned an unusable response'); throw new AiUnavailableError('bad_response'); }
-    succeeded();
+    const choice = data?.choices?.[0];
+    let text = choice?.message?.content;
+    if (Array.isArray(text)) text = text.map((p) => (typeof p === 'string' ? p : p?.text || '')).join('');
+    if (typeof text !== 'string' || !text.trim()) {
+      const truncated = choice?.finish_reason === 'length';
+      failed(); note(truncated ? 'truncated' : 'bad_response', null, truncated ? 'The model used all its tokens thinking and returned no text.' : `The provider returned no text (finish_reason: ${choice?.finish_reason || 'unknown'}).`);
+      console.error('AI provider returned no usable text');
+      throw new AiUnavailableError(truncated ? 'truncated' : 'bad_response');
+    }
+    succeeded(); lastError = null;
     return text.trim().slice(0, 4000);
   } catch (e) {
     if (e instanceof AiUnavailableError) throw e;
     failed();
     const timedOut = e?.name === 'AbortError';
+    note(timedOut ? 'timeout' : 'network', null, timedOut ? 'No answer within the time limit.' : 'Could not reach the provider.');
     console.error(timedOut ? 'AI call timed out' : `AI call failed: ${e?.name || 'error'}`);
     throw new AiUnavailableError(timedOut ? 'timeout' : 'network');
   } finally { clearTimeout(timer); release(); }
@@ -111,13 +139,14 @@ async function status() {
     configured: configured(), host: hostOf(), model: cfg().model || null,
     enabled: await switchOn(),
     circuitOpen: Date.now() < breaker.openUntil, consecutiveFailures: breaker.failures,
+    reasoningEffort: reasoningEffort(), lastError,
     inFlight: active, queued: waiting.length, limits: { timeoutMs: cfg().timeoutMs, maxConcurrent: cfg().maxConcurrent },
   };
 }
 async function testConnection() {
   const t0 = Date.now();
-  const reply = await chat({ messages: [{ role: 'user', content: 'Reply with the single word: OK' }], maxTokens: 8, temperature: 0 });
+  const reply = await chat({ messages: [{ role: 'user', content: 'Reply with the single word: OK' }], maxTokens: 32, temperature: 0 });
   return { ok: true, ms: Date.now() - t0, reply: reply.slice(0, 40) };
 }
-const _reset = () => { breaker.failures = 0; breaker.openUntil = 0; active = 0; waiting.length = 0; switchCache = { at: 0, enabled: true }; };
+const _reset = () => { lastError = null; breaker.failures = 0; breaker.openUntil = 0; active = 0; waiting.length = 0; switchCache = { at: 0, enabled: true }; };
 module.exports = { chat, status, testConnection, setSwitch, AiUnavailableError, configured, _reset };

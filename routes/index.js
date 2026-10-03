@@ -19,9 +19,11 @@ const dash = require('../controllers/dashboardController');
 const pushCtl = require('../controllers/pushController');
 const security = require('../controllers/securityController');
 const aiCtl = require('../controllers/aiController');
+const planCtl = require('../controllers/planController');
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many attempts. Try again in a few minutes.' } });
 const forgotLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many requests. Try again in a few minutes.' } });
+const aiUserLimiter = rateLimit({ windowMs: 60 * 1000, max: 6, standardHeaders: true, legacyHeaders: false, keyGenerator: (req) => String(req.user?._id || 'anon'), message: { success: false, message: 'Slow down a little and try again in a minute.' } });
 const { SUPER_ADMIN, ORGANIZATION_OWNER, ORGANIZATION_MEMBER, INDIVIDUAL } = ROLES;
 const orgUsers = authorize(ORGANIZATION_OWNER, ORGANIZATION_MEMBER);
 const ownerOnly = authorize(ORGANIZATION_OWNER);
@@ -49,6 +51,9 @@ router.post('/auth/2fa/enable', authLimiter, validate(v.code2fa), security.enabl
 router.post('/auth/2fa/disable', authLimiter, validate(v.disable2fa), security.disable2fa);
 
 router.get('/dashboard', dash.get);
+router.get('/ai/me', authorize(INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), planCtl.me);
+router.put('/ai/me', authorize(INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), validate(v.aiOptIn), planCtl.setOptIn);
+router.post('/ai/plan-day', authorize(INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), aiUserLimiter, planCtl.planDay);
 router.get('/push/config', pushCtl.config);
 router.post('/push/subscribe', validate(v.pushSubscription), pushCtl.subscribe);
 router.post('/push/unsubscribe', validate(v.pushEndpoint), pushCtl.unsubscribe);

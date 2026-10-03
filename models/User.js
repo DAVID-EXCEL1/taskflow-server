@@ -13,6 +13,8 @@ const userSchema = new mongoose.Schema(
     organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', index: true },
     teams: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Team' }],
     isActive: { type: Boolean, default: true },
+    aiOptIn: { type: Boolean, default: false }, // consent for AI suggestions (individuals; owners set it for their organization)
+    aiOptInAt: Date,
     termsAcceptedAt: Date, // when they ticked "I agree" at sign-up
     termsVersion: String,
     passwordChangedAt: Date, // sessions issued before this are rejected
