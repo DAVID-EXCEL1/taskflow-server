@@ -19,7 +19,7 @@ exports.unsubscribe = asyncHandler(async (req, res) => {
   res.json({ success: true, message: 'Browser notifications are off for this device.' });
 });
 exports.test = asyncHandler(async (req, res) => {
-  const sent = await push.sendToUsers([req.user._id], { title: 'TaskDesk', message: 'Browser notifications are working.', link: '/profile' });
+  const sent = await push.sendToUsers([req.user._id], { title: process.env.APP_NAME || 'Taxkflow', message: 'Browser notifications are working.', link: '/profile' });
   if (!sent) throw new AppError('No device is registered yet. Turn notifications on first.', 404);
   res.json({ success: true, message: `Test sent to ${sent} device${sent === 1 ? '' : 's'}.` });
 });

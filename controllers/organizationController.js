@@ -12,6 +12,7 @@ const { escapeRegex, pageParams } = require('../utils/helpers');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
 const crypto = require('crypto');
+const APP = () => process.env.APP_NAME || 'Taxkflow';
 
 exports.getMine = asyncHandler(async (req, res) => {
   const org = await Organization.findById(req.user.organization).populate('owner', 'name email');
@@ -92,18 +93,24 @@ exports.deleteTeam = asyncHandler(async (req, res) => {
 // ---- Invitations ----
 exports.listInvitations = asyncHandler(async (req, res) => {
   await Invitation.updateMany({ organization: req.user.organization, status: INVITE_STATUS.PENDING, expiresAt: { $lt: new Date() } }, { status: INVITE_STATUS.EXPIRED });
+  // Pending invites to an email that has since registered can no longer be used - close them so the list stays honest.
+  const pending = await Invitation.find({ organization: req.user.organization, status: INVITE_STATUS.PENDING }).select('email').lean();
+  if (pending.length) {
+    const taken = await User.find({ email: { $in: pending.map((p) => p.email) } }).select('email').lean();
+    if (taken.length) await Invitation.updateMany({ organization: req.user.organization, status: INVITE_STATUS.PENDING, email: { $in: taken.map((t) => t.email) } }, { status: INVITE_STATUS.EXPIRED });
+  }
   res.json({ success: true, data: await Invitation.find({ organization: req.user.organization }).populate('team', 'name').sort({ createdAt: -1 }).limit(100) });
 });
 exports.createInvitation = asyncHandler(async (req, res) => {
   const { email, team } = req.body;
   const orgId = req.user.organization;
   if (await User.exists({ email, organization: orgId })) throw new AppError('This person is already a member.', 409);
+  // Someone who already has an account can't be invited: joining would move them into the organization and hide their own personal tasks.
+  // The message is deliberately general so it doesn't confirm who has an account.
+  if (await User.exists({ email })) throw new AppError(`This email can't be invited. If the person already uses ${APP()}, they'll need to use a different email address to join.`, 409, { code: 'EMAIL_HAS_ACCOUNT' });
   if (team && !(await Team.exists({ _id: team, organization: orgId }))) throw new AppError('Team not found.', 400);
   await Invitation.updateMany({ organization: orgId, email, status: INVITE_STATUS.PENDING }, { status: INVITE_STATUS.EXPIRED });
   const invite = await Invitation.create({ organization: orgId, email, team: team || undefined, invitedBy: req.user._id, token: crypto.randomBytes(24).toString('hex'), expiresAt: new Date(Date.now() + 7 * 86400000) });
-  const org = await Organization.findById(orgId);
-  const existing = await User.findOne({ email }).select('_id');
-  if (existing) await notify(existing._id, { type: 'INVITATION_RECEIVED', title: 'Organization invitation', message: `${org.name} invited you to join.`, link: `/invite/${invite.token}` });
   await activity.log({ actor: req.user, action: 'MEMBER_INVITED', message: `Invited ${email}`, organization: orgId, entityType: 'Invitation', entityId: invite._id });
   res.status(201).json({ success: true, data: invite });
 });
@@ -131,14 +138,9 @@ async function loadOwnInvite(req) {
   return inv;
 }
 exports.acceptInvite = asyncHandler(async (req, res) => {
-  const inv = await loadOwnInvite(req);
-  if (req.user.role !== ROLES.INDIVIDUAL) throw new AppError('Only personal accounts can join an organization.', 400);
-  await User.updateOne({ _id: req.user._id }, { role: ROLES.ORGANIZATION_MEMBER, organization: inv.organization, teams: inv.team ? [inv.team] : [] });
-  inv.status = INVITE_STATUS.ACCEPTED; inv.respondedAt = new Date(); await inv.save();
-  const org = await Organization.findById(inv.organization);
-  await notify(org.owner, { type: 'INVITATION_ACCEPTED', title: 'Invitation accepted', message: `${req.user.name} joined ${org.name}.`, link: '/members' });
-  await activity.log({ actor: req.user, action: 'MEMBER_JOINED', message: `${req.user.name} joined the organization`, organization: org._id, entityType: 'User', entityId: req.user._id });
-  res.json({ success: true, message: `You joined ${org.name}.` });
+  await loadOwnInvite(req);
+  // Existing accounts can no longer be converted into members: it used to hide their personal tasks. New people join by registering through the invite link.
+  throw new AppError(`This email already has a ${APP()} account, so it can't join an organization. Ask the organization to invite a different email address.`, 409, { code: 'EMAIL_HAS_ACCOUNT' });
 });
 exports.rejectInvite = asyncHandler(async (req, res) => {
   const inv = await loadOwnInvite(req);

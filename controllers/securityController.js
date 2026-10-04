@@ -100,7 +100,7 @@ exports.setup2fa = asyncHandler(async (req, res) => {
   if (user.twoFactor?.enabled) throw new AppError('Two-factor authentication is already on.', 409);
   const secret = totp.generateSecret();
   await User.updateOne({ _id: user._id }, { $set: { 'twoFactor.pendingSecretEnc': encrypt(secret) } });
-  const uri = totp.otpauthUri({ secret, account: user.email, issuer: process.env.APP_NAME || 'TaskDesk' });
+  const uri = totp.otpauthUri({ secret, account: user.email, issuer: process.env.APP_NAME || 'Taxkflow' });
   res.json({ success: true, secret, qrDataUrl: await QRCode.toDataURL(uri, { margin: 1, width: 220 }) });
 });
 

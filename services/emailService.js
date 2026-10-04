@@ -2,10 +2,10 @@
  * Email over HTTPS APIs (works on hosts that block SMTP ports).
  *   EMAIL_PROVIDER=resend  + RESEND_API_KEY
  *   EMAIL_PROVIDER=brevo   + BREVO_API_KEY
- *   EMAIL_FROM="TaskDesk <no-reply@yourdomain.com>"
+ *   EMAIL_FROM="Taxkflow <no-reply@yourdomain.com>"
  * If not configured, send() logs a warning and returns { sent: false } - it never throws.
  */
-const APP = process.env.APP_NAME || 'TaskDesk';
+const APP = process.env.APP_NAME || 'Taxkflow';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const parseFrom = (from) => { const m = String(from).match(/^(.*)<(.+)>$/); return m ? { name: m[1].trim().replace(/^"|"$/g, ''), email: m[2].trim() } : { name: APP, email: String(from).trim() }; };
 
