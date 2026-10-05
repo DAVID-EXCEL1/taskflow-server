@@ -63,6 +63,9 @@ const status = z.object({ isActive: z.boolean() });
 const aiSwitch = z.object({ enabled: z.boolean() });
 const aiDraft = z.object({ prompt: z.string().trim().min(3, 'Describe what you need to do').max(600, 'Please keep it under 600 characters') });
 const aiOptIn = z.object({ enabled: z.boolean() });
+const deleteRequest = z.object({ password: z.string().min(1, 'Enter your password'), code: z.string().trim().max(20).optional(), confirm: z.string().trim().min(1, 'Type the confirmation text').max(200), reason: optStr(300) });
+const purgeNow = z.object({ confirm: z.literal('DELETE', { errorMap: () => ({ message: 'Type DELETE to confirm' }) }) });
+const memberDeactivate = z.object({ reason: optStr(300) });
 const forgotPassword = z.object({ email });
 const resetPassword = z.object({ token: z.string().min(32).max(200), password });
 const login2fa = z.object({ challengeToken: z.string().min(10).max(2000), code: z.string().trim().min(6).max(20) });
@@ -76,4 +79,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };

@@ -84,6 +84,8 @@ async function checkSecondFactor(user, rawCode) {
   await User.updateOne({ _id: user._id }, { $set: { 'twoFactor.failedAttempts': 0 }, $unset: { 'twoFactor.lockedUntil': 1 } });
 }
 
+exports.checkSecondFactor = checkSecondFactor; // also used to confirm account deletion
+
 exports.login2fa = asyncHandler(async (req, res) => {
   let payload;
   try { payload = jwt.verify(req.body.challengeToken, process.env.JWT_SECRET); } catch { throw new AppError('Your login session expired. Please log in again.', 401); }

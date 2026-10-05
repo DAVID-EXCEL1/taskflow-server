@@ -15,7 +15,7 @@ const { notify } = require('../services/notificationService');
 const { signChallenge } = require('../middleware/auth');
 const email = require('../services/emailService');
 
-const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, twoFactorEnabled: !!u.twoFactor?.enabled, timezone: u.timezone || 'Africa/Lagos', role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
+const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, twoFactorEnabled: !!u.twoFactor?.enabled, deletionScheduledFor: u.deletion?.scheduledFor || null, timezone: u.timezone || 'Africa/Lagos', role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
 
 async function buildSession(userDoc) {
   const user = userDoc.toObject ? userDoc.toObject() : userDoc;
@@ -68,7 +68,11 @@ exports.login = asyncHandler(async (req, res) => {
   const user = await User.findOne({ email: req.body.email }).select('+password');
   // Same message for unknown email and wrong password.
   if (!user || !(await user.comparePassword(req.body.password))) throw new AppError('Incorrect email or password.', 401);
-  if (!user.isActive) throw new AppError('This account has been deactivated. Contact support.', 403);
+  if (!user.isActive) throw new AppError(user.orgDeactivation?.at ? 'Your access was deactivated by your organization owner. Please contact them.' : 'This account has been deactivated. Contact support.', 403);
+  if (user.role === ROLES.ORGANIZATION_MEMBER && user.organization) {
+    const org = await Organization.findById(user.organization).select('deletion').lean();
+    if (org?.deletion?.scheduledFor) throw new AppError('Your organization has been closed by its owner.', 403);
+  }
   // Password is correct. If 2FA is on, no session yet: the client must send the code to /auth/login/2fa.
   if (user.twoFactor?.enabled) return res.json({ success: true, twoFactorRequired: true, challengeToken: signChallenge(user._id) });
   user.lastLoginAt = new Date();

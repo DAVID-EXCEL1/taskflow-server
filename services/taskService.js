@@ -51,7 +51,7 @@ async function validateReferences(user, data) {
     if (isMember && !myTeams.includes(String(data.assignedTeam))) throw new AppError('You can only assign tasks to your own teams.', 403);
   }
   if (data.assignedTo) {
-    const target = await User.findOne({ _id: data.assignedTo, organization: org }).select('teams').lean();
+    const target = await User.findOne({ _id: data.assignedTo, organization: org, isActive: true }).select('teams').lean();
     if (!target) throw new AppError('Selected member does not belong to your organization.', 400);
     if (isMember && String(data.assignedTo) !== String(user._id) && !target.teams.some((t) => myTeams.includes(String(t)))) {
       throw new AppError('You can only assign tasks to yourself or people in your teams.', 403);

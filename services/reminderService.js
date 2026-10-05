@@ -6,6 +6,7 @@ const { recipientsFor } = require('./subscriptionService');
 const activity = require('./activityService');
 const { daysBetween } = require('../utils/helpers');
 const { runTaskReminders } = require('./taskReminderService');
+const { runAccountPurges } = require('./accountDeletionService');
 
 const subjectOf = (d) => (d.user ? { user: d.user } : { organization: d.organization });
 
@@ -52,7 +53,8 @@ async function runScheduledJobs() {
   try {
     const subscriptionNotices = await runSubscriptionChecks();
     const taskReminders = await runTaskReminders();
-    return { subscriptionNotices, taskReminders };
+    const accountsDeleted = await runAccountPurges();
+    return { subscriptionNotices, taskReminders, accountsDeleted };
   } finally { running = false; }
 }
 

@@ -11,6 +11,7 @@ const schema = new mongoose.Schema(
     payment: { type: mongoose.Schema.Types.ObjectId, ref: 'Payment' },
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', index: true },
+    holder: { name: String, email: String, deleted: Boolean }, // who it belonged to, kept after the account is deleted
     remindersSent: [Number],
     expiryNotified: { type: Boolean, default: false },
   },

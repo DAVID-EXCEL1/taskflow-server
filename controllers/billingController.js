@@ -42,7 +42,7 @@ exports.listSubscriptions = asyncHandler(async (req, res) => {
     Subscription.find(filter).populate('user', 'name email').populate('organization', 'name').sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
     Subscription.countDocuments(filter),
   ]);
-  const data = rows.map((s) => ({ ...s, effectiveStatus: s.status === 'Active' && s.endDate <= now ? 'Expired' : s.status === 'Active' && s.startDate > now ? 'Scheduled' : s.status }));
+  const data = rows.map((s) => ({ ...s, effectiveStatus: s.holder?.deleted ? 'Closed' : s.status === 'Active' && s.endDate <= now ? 'Expired' : s.status === 'Active' && s.startDate > now ? 'Scheduled' : s.status }));
   res.json({ success: true, data, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
 });
 

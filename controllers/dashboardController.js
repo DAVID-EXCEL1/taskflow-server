@@ -41,8 +41,8 @@ async function adminDashboard() {
     User.countDocuments({ role: ROLES.INDIVIDUAL }),
     Organization.countDocuments(),
     Payment.countDocuments({ status: 'Pending' }),
-    Subscription.find({ status: 'Active', startDate: { $lte: now }, endDate: { $gt: now } }).select('plan user organization').lean(),
-    Subscription.find({ status: 'Active' }).select('user organization endDate startDate').lean(),
+    Subscription.find({ status: 'Active', 'holder.deleted': { $ne: true }, startDate: { $lte: now }, endDate: { $gt: now } }).select('plan user organization').lean(),
+    Subscription.find({ status: 'Active', 'holder.deleted': { $ne: true } }).select('user organization endDate startDate').lean(),
     Payment.aggregate([{ $match: { status: 'Approved', reviewedAt: { $gte: monthStart } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
     Payment.aggregate([{ $match: { status: 'Approved', reviewedAt: { $gte: since } } }, { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$reviewedAt' } }, total: { $sum: '$amount' } } }]),
     User.aggregate([{ $match: { role: { $ne: ROLES.SUPER_ADMIN }, createdAt: { $gte: since } } }, { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } }, total: { $sum: 1 } } }]),
@@ -90,7 +90,7 @@ exports.get = asyncHandler(async (req, res) => {
   if (u.role === ROLES.INDIVIDUAL) return res.json({ success: true, kind: 'individual', data: base });
 
   const org = u.organization;
-  const [members, teams] = await Promise.all([User.countDocuments({ organization: org }), Team.countDocuments({ organization: org })]);
+  const [members, teams] = await Promise.all([User.countDocuments({ organization: org, isActive: true }), Team.countDocuments({ organization: org })]);
   base.stats = { ...stats, members, teams };
   const teamRows = await Task.aggregate([{ $match: { ...scope, assignedTeam: { $ne: null } } }, { $group: { _id: { t: '$assignedTeam', s: '$status' }, n: { $sum: 1 } } }]);
   const teamDocs = await Team.find(u.role === ROLES.ORGANIZATION_OWNER ? { organization: org } : { _id: { $in: u.teams || [] } }).select('name').lean();

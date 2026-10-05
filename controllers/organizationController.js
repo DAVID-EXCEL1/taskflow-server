@@ -27,7 +27,7 @@ exports.updateMine = asyncHandler(async (req, res) => {
 
 // ---- Members ----
 exports.listMembers = asyncHandler(async (req, res) => {
-  const members = await User.find({ organization: req.user.organization }).select('name email role teams isActive createdAt lastLoginAt').populate('teams', 'name').sort({ name: 1 }).lean();
+  const members = await User.find({ organization: req.user.organization }).select('name email role teams isActive orgDeactivation createdAt lastLoginAt').populate('teams', 'name').sort({ name: 1 }).lean();
   res.json({ success: true, data: members });
 });
 exports.setMemberTeams = asyncHandler(async (req, res) => {
@@ -40,17 +40,24 @@ exports.setMemberTeams = asyncHandler(async (req, res) => {
   await activity.log({ actor: req.user, action: 'MEMBER_TEAMS_UPDATED', message: `Updated team assignment for ${member.name}`, organization: req.user.organization, entityType: 'User', entityId: member._id });
   res.json({ success: true, data: await User.findById(member._id).select('name email role teams').populate('teams', 'name') });
 });
-exports.removeMember = asyncHandler(async (req, res) => {
+exports.deactivateMember = asyncHandler(async (req, res) => {
   const member = await User.findOne({ _id: req.params.id, organization: req.user.organization });
   if (!member) throw new AppError('Member not found.', 404);
-  if (member.role === ROLES.ORGANIZATION_OWNER) throw new AppError('The organization owner cannot be removed.', 400);
-  // Detach: account is kept (as an unsubscribed personal account); org tasks stay with the org.
-  await Task.updateMany({ organization: req.user.organization, assignedTo: member._id }, { $unset: { assignedTo: 1 } });
-  member.organization = undefined; member.teams = []; member.role = ROLES.INDIVIDUAL;
-  await member.save();
-  await notify(member._id, { type: 'MEMBER_REMOVED', title: 'Removed from organization', message: 'You were removed from your organization.', link: '/' });
-  await activity.log({ actor: req.user, action: 'MEMBER_REMOVED', message: `Removed ${member.name} from the organization`, organization: req.user.organization, entityType: 'User', entityId: member._id });
-  res.json({ success: true, message: 'Member removed.' });
+  if (member.role === ROLES.ORGANIZATION_OWNER) throw new AppError('The organization owner cannot be deactivated.', 400);
+  if (!member.isActive) throw new AppError('This member is already deactivated.', 409);
+  // Deactivate, never delete: the person stays on record (and keeps their history), cannot sign in, and can be reactivated.
+  await User.updateOne({ _id: member._id }, { $set: { isActive: false, passwordChangedAt: new Date(), orgDeactivation: { at: new Date(), by: req.user._id, byName: req.user.name, reason: req.body.reason || undefined } } });
+  await activity.log({ actor: req.user, action: 'MEMBER_DEACTIVATED', message: `Deactivated ${member.name}`, organization: req.user.organization, entityType: 'User', entityId: member._id });
+  res.json({ success: true, message: `${member.name} was deactivated. They are kept in your deactivated members list.` });
+});
+exports.reactivateMember = asyncHandler(async (req, res) => {
+  const member = await User.findOne({ _id: req.params.id, organization: req.user.organization });
+  if (!member) throw new AppError('Member not found.', 404);
+  if (member.isActive) throw new AppError('This member is already active.', 409);
+  if (!member.orgDeactivation?.at) throw new AppError('This account was deactivated by the platform. Please contact support.', 409);
+  await User.updateOne({ _id: member._id }, { $set: { isActive: true }, $unset: { orgDeactivation: 1 } });
+  await activity.log({ actor: req.user, action: 'MEMBER_REACTIVATED', message: `Reactivated ${member.name}`, organization: req.user.organization, entityType: 'User', entityId: member._id });
+  res.json({ success: true, message: `${member.name} can sign in again.` });
 });
 
 // ---- Teams ----
@@ -58,7 +65,7 @@ exports.listTeams = asyncHandler(async (req, res) => {
   const filter = { organization: req.user.organization };
   if (req.user.role === ROLES.ORGANIZATION_MEMBER) filter._id = { $in: req.user.teams || [] };
   const teams = await Team.find(filter).populate('leader', 'name').sort({ name: 1 }).lean();
-  const counts = await User.aggregate([{ $match: { organization: req.user.organization } }, { $unwind: '$teams' }, { $group: { _id: '$teams', n: { $sum: 1 } } }]);
+  const counts = await User.aggregate([{ $match: { organization: req.user.organization, isActive: true } }, { $unwind: '$teams' }, { $group: { _id: '$teams', n: { $sum: 1 } } }]);
   const map = Object.fromEntries(counts.map((c) => [String(c._id), c.n]));
   res.json({ success: true, data: teams.map((t) => ({ ...t, memberCount: map[String(t._id)] || 0 })) });
 });

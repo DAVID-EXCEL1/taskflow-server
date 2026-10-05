@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
-const { protect, authorize, requireTwoFactor } = require('../middleware/auth');
+const { protect, authorize, requireTwoFactor, deletionGate } = require('../middleware/auth');
 const { requirePermission } = require('../config/permissions');
 const { requireActiveSubscription: writable } = require('../middleware/subscriptionGuard');
 const validate = require('../middleware/validate');
@@ -18,6 +18,7 @@ const misc = require('../controllers/miscController');
 const dash = require('../controllers/dashboardController');
 const pushCtl = require('../controllers/pushController');
 const security = require('../controllers/securityController');
+const account = require('../controllers/accountController');
 const aiCtl = require('../controllers/aiController');
 const planCtl = require('../controllers/planController');
 
@@ -43,6 +44,7 @@ router.post('/cron/run', pushCtl.cron);
 
 // ---- Everything below requires login ----
 router.use(protect);
+router.use(deletionGate); // an account in its 30-day deletion period can only view itself and restore
 router.get('/auth/me', auth.me);
 router.put('/auth/profile', validate(v.profile), auth.updateProfile);          // allowed while read-only
 router.put('/auth/password', authLimiter, validate(v.changePassword), auth.changePassword);
@@ -87,7 +89,15 @@ router.patch('/organizations/:id/status', adminOnly, requireTwoFactor, validate(
 
 router.get('/members', orgUsers, orgs.listMembers);
 router.put('/members/:id/teams', ownerOnly, writable, validate(v.memberTeams), orgs.setMemberTeams);
-router.delete('/members/:id', ownerOnly, writable, orgs.removeMember);
+router.patch('/members/:id/deactivate', ownerOnly, writable, validate(v.memberDeactivate), orgs.deactivateMember);
+router.patch('/members/:id/reactivate', ownerOnly, writable, orgs.reactivateMember);
+
+// Account deletion (30-day grace period) and the Super Admin's deleted-accounts register
+router.post('/account/delete-request', authLimiter, validate(v.deleteRequest), account.requestDeletion);
+router.post('/account/restore', account.restore);
+router.get('/admin/deleted', adminOnly, account.adminList);
+router.post('/admin/deleted/:id/restore', adminOnly, requireTwoFactor, account.adminRestore);
+router.post('/admin/deleted/:id/purge-now', adminOnly, requireTwoFactor, validate(v.purgeNow), account.adminPurgeNow);
 
 router.get('/teams', orgUsers, orgs.listTeams);
 router.post('/teams', ownerOnly, writable, validate(v.team), orgs.createTeam);

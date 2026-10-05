@@ -14,6 +14,7 @@ const schema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
     organization: { type: mongoose.Schema.Types.ObjectId, ref: 'Organization', index: true },
     subscription: { type: mongoose.Schema.Types.ObjectId, ref: 'Subscription' },
+    holder: { name: String, email: String, deleted: Boolean }, // who it belonged to, kept after the account is deleted
     reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     reviewedAt: Date,
     rejectionReason: String,
