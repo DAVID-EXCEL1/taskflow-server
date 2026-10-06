@@ -10,4 +10,5 @@ const schema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+schema.index({ createdAt: 1 }); // lets the automatic cleanup find old notifications quickly
 module.exports = mongoose.model('Notification', schema);

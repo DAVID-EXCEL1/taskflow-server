@@ -31,7 +31,7 @@ const ownerOnly = authorize(ORGANIZATION_OWNER);
 const adminOnly = authorize(SUPER_ADMIN);
 
 // ---- Public ----
-router.get('/health', (req, res) => res.json({ ok: true, version: 'update-2-account-deletion' })); // open /api/health to see which server version is live
+router.get('/health', (req, res) => res.json({ ok: true, version: 'update-3-deletion-reuse-cleanup' })); // open /api/health to see which server version is live
 router.get('/plans', billing.plans);
 router.post('/auth/register', authLimiter, validate(v.register), auth.register);
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);

@@ -7,6 +7,7 @@ const activity = require('./activityService');
 const { daysBetween } = require('../utils/helpers');
 const { runTaskReminders } = require('./taskReminderService');
 const { runAccountPurges } = require('./accountDeletionService');
+const { runCleanup } = require('./cleanupService');
 
 const subjectOf = (d) => (d.user ? { user: d.user } : { organization: d.organization });
 
@@ -54,7 +55,9 @@ async function runScheduledJobs() {
     const subscriptionNotices = await runSubscriptionChecks();
     const taskReminders = await runTaskReminders();
     const accountsDeleted = await runAccountPurges();
-    return { subscriptionNotices, taskReminders, accountsDeleted };
+    // Housekeeping must never break the reminders above, so a failure here is only logged.
+    const cleanup = await runCleanup().catch((e) => { console.error('Cleanup failed:', e.message); return null; });
+    return { subscriptionNotices, taskReminders, accountsDeleted, ...(cleanup ? { cleanup } : {}) };
   } finally { running = false; }
 }
 

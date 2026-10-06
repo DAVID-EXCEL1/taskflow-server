@@ -6,6 +6,7 @@ const ai = require('../services/aiService');
 const quota = require('../services/aiQuota');
 const plan = require('../services/planService');
 const draft = require('../services/draftService');
+const planCache = require('../services/planCache');
 const Category = require('../models/Category');
 const { buildScope } = require('../services/taskService');
 const { getAccess } = require('../services/subscriptionService');
@@ -49,12 +50,20 @@ exports.planDay = asyncHandler(async (req, res) => {
   if (!basic.totalItems) return res.json({ success: true, data: out }); // nothing to plan: do not spend a request
   const st = await ai.status();
   if (!st.configured || !st.enabled || st.circuitOpen) { out.aiNote = 'unavailable'; return res.json({ success: true, data: out }); }
+  // Same tasks as a few minutes ago? Reuse that answer: no AI call and no use spent.
+  const fp = planCache.fingerprint(basic);
+  const hit = planCache.get(req.user._id, fp);
+  if (hit) {
+    const used = await quota.usedToday(req.user._id);
+    Object.assign(out, { source: 'ai', summary: hit.summary, remaining: Math.max(s.limit - used, 0), cached: true, cachedMinutesAgo: hit.minutesAgo });
+    return res.json({ success: true, data: out });
+  }
   const q = await quota.consume(req.user._id, s.limit);
   if (!q.ok) { out.aiNote = 'limit'; return res.json({ success: true, data: out }); }
   try {
     const text = await ai.chat({ messages: plan.buildMessages(basic, tz), maxTokens: 220, temperature: 0.3 });
     const summary = plan.cleanAiText(text);
-    if (summary) Object.assign(out, { source: 'ai', summary, remaining: q.remaining }); else { await quota.refund(req.user._id); out.aiNote = 'unavailable'; }
+    if (summary) { planCache.set(req.user._id, fp, summary); Object.assign(out, { source: 'ai', summary, remaining: q.remaining }); } else { await quota.refund(req.user._id); out.aiNote = 'unavailable'; }
   } catch (e) {
     await quota.refund(req.user._id); // a failed attempt must not cost the user a use
     if (!(e instanceof ai.AiUnavailableError)) console.error('Plan my day failed:', e.message);
