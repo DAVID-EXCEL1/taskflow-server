@@ -12,7 +12,8 @@ app.set('trust proxy', 1);
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
 const origins = (process.env.CLIENT_URL || 'http://localhost:5173').split(',').map((s) => s.trim());
 app.use(cors({ origin: origins, credentials: true }));
-app.use(express.json({ limit: '100kb' }));
+// rawBody is kept ONLY so webhook signatures (Paystack) can be verified against the exact bytes that were sent.
+app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(express.urlencoded({ extended: true, limit: '100kb' }));
 app.use(mongoSanitize()); // strips $ and . operators from input (NoSQL injection)
 if (process.env.NODE_ENV !== 'test') app.use(morgan(process.env.NODE_ENV === 'production' ? 'combined' : 'dev'));

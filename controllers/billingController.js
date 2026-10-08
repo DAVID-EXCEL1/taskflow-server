@@ -4,6 +4,7 @@ const Subscription = require('../models/Subscription');
 const Payment = require('../models/Payment');
 const Setting = require('../models/Setting');
 const ProofFile = require('../models/ProofFile');
+const pricing = require('../services/pricingService');
 const storage = require('../services/storageService');
 const User = require('../models/User');
 const email = require('../services/emailService');
@@ -24,7 +25,10 @@ const scopeFor = (u) => {
   return s;
 };
 
-exports.plans = (req, res) => res.json({ success: true, data: Object.values(PLANS) });
+exports.plans = asyncHandler(async (req, res) => {
+  const prices = await pricing.getPrices();
+  res.json({ success: true, data: Object.values(PLANS).map((p) => ({ ...p, price: prices[p.key].NGN, prices: prices[p.key] })) });
+});
 
 exports.myStatus = asyncHandler(async (req, res) => res.json({ success: true, data: await svc.getAccess(req.user) }));
 
@@ -83,11 +87,18 @@ exports.proof = asyncHandler(async (req, res) => {
   throw new AppError('This proof file is no longer available. It was stored on temporary server storage that was reset.', 404);
 });
 
+// Online (Paystack) payments are confirmed by Paystack itself - an admin cannot approve or reject them by hand.
+async function refuseOnline(id) {
+  const p = await Payment.findById(id).select('method').lean();
+  if (p?.method === 'paystack') throw new AppError('Online payments are confirmed automatically by Paystack. Use "Check with Paystack" instead.', 400);
+}
 exports.approve = asyncHandler(async (req, res) => {
+  await refuseOnline(req.params.id);
   const { payment, subscription } = await svc.approvePayment(req.params.id, req.user);
   res.json({ success: true, data: { payment, subscription }, message: 'Payment approved and subscription activated.' });
 });
 exports.reject = asyncHandler(async (req, res) => {
+  await refuseOnline(req.params.id);
   const payment = await svc.rejectPayment(req.params.id, req.user, req.body.reason);
   res.json({ success: true, data: payment, message: 'Payment rejected.' });
 });

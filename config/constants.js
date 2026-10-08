@@ -28,7 +28,7 @@ const PLANS = Object.freeze({
 const TASK_PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'];
 const TASK_STATUSES = ['Pending', 'In Progress', 'Completed', 'Cancelled'];
 const SUB_STATUS = Object.freeze({ PENDING: 'Pending', ACTIVE: 'Active', EXPIRED: 'Expired', REJECTED: 'Rejected' });
-const PAYMENT_STATUS = Object.freeze({ PENDING: 'Pending', APPROVED: 'Approved', REJECTED: 'Rejected' });
+const PAYMENT_STATUS = Object.freeze({ PENDING: 'Pending', APPROVED: 'Approved', REJECTED: 'Rejected', CANCELLED: 'Cancelled' });
 const INVITE_STATUS = Object.freeze({ PENDING: 'Pending', ACCEPTED: 'Accepted', REJECTED: 'Rejected', EXPIRED: 'Expired' });
 const DEFAULT_CATEGORIES = [
   { name: 'Work', color: '#0F6B4F' },

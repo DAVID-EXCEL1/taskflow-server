@@ -4,6 +4,10 @@ const schema = new mongoose.Schema(
   {
     plan: { type: String, enum: ['INDIVIDUAL', 'BUSINESS'], required: true },
     amount: { type: Number, required: true },
+    currency: { type: String, default: 'NGN' },
+    method: { type: String, enum: ['bank_transfer', 'paystack'], default: 'bank_transfer', index: true },
+    // Online payments: Paystack's reference for the checkout, and what Paystack told us once it was paid.
+    gateway: { provider: String, reference: { type: String, index: true, sparse: true }, paidAt: Date, channel: String },
     paymentDate: { type: Date, required: true },
     reference: { type: String, trim: true, maxlength: 120 },
     description: { type: String, trim: true, maxlength: 500 },

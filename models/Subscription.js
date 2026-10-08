@@ -5,6 +5,7 @@ const schema = new mongoose.Schema(
   {
     plan: { type: String, enum: ['INDIVIDUAL', 'BUSINESS'], required: true },
     amount: { type: Number, required: true },
+    currency: { type: String, default: 'NGN' },
     status: { type: String, enum: Object.values(SUB_STATUS), default: SUB_STATUS.PENDING, index: true },
     startDate: Date,
     endDate: { type: Date, index: true },

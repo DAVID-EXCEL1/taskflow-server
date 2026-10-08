@@ -9,8 +9,10 @@ const { addMonths, daysBetween } = require('../utils/helpers');
 const { ROLES, PLANS, SUB_STATUS, PAYMENT_STATUS, RENEWAL_WINDOW_DAYS } = require('../config/constants');
 const { notify, notifyAdmins } = require('./notificationService');
 const activity = require('./activityService');
+const pricing = require('./pricingService');
 
 const fmtNaira = (n) => `₦${Number(n).toLocaleString('en-NG')}`;
+const fmtMoney = (n, currency) => pricing.fmtMoney(n, currency);
 const fmtDate = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 
 // Which "subject" holds the subscription: the user (Individual) or the organization (Business).
@@ -37,12 +39,13 @@ async function getAccess(user) {
   const [current, latest, pending, lastPayment] = await Promise.all([
     Subscription.findOne({ ...subject, status: SUB_STATUS.ACTIVE, startDate: { $lte: now }, endDate: { $gt: now } }).sort({ endDate: -1 }).lean(),
     Subscription.findOne({ ...subject, status: SUB_STATUS.ACTIVE }).sort({ endDate: -1 }).lean(),
-    Payment.exists({ ...subject, status: PAYMENT_STATUS.PENDING }),
+    // Only bank-transfer payments count as "awaiting approval": an unfinished online checkout never blocks anyone.
+    Payment.exists({ ...subject, status: PAYMENT_STATUS.PENDING, 'gateway.provider': { $exists: false } }),
     Payment.findOne({ ...subject }).sort({ createdAt: -1 }).select('status rejectionReason').lean(),
   ]);
 
   const base = {
-    plan: plan.key, planName: plan.name, price: plan.price,
+    plan: plan.key, planName: plan.name, price: await pricing.getPrice(plan.key), currency: 'NGN',
     hasPendingPayment: !!pending,
     canRenew: !pending,
     paidUntil: latest?.endDate || null,
@@ -76,39 +79,44 @@ async function submitPayment(user, body, file) {
   if (!subject) throw new AppError('Your account cannot submit payments.', 403);
   const planKey = planFor(user);
   const plan = PLANS[planKey];
+  const methods = await pricing.getMethods();
+  if (!methods.bankTransfer) throw new AppError('Bank transfer is not available right now. Please pay online.', 403);
+  const price = await pricing.getPrice(planKey);
 
   if (file && !hasValidSignature(file)) throw new AppError('That file is not a valid JPG, PNG, WEBP or PDF.', 400);
   const access = await getAccess(user);
   if (access.hasPendingPayment) throw new AppError('You already have a payment awaiting approval.', 409);
   if (!access.canRenew) throw new AppError(`Your subscription is active until ${fmtDate(access.endDate)}. You can renew from ${fmtDate(access.renewOpensAt)}.`, 400);
-  if (Number(body.amount) !== plan.price) throw new AppError(`The ${plan.name} plan costs ${fmtNaira(plan.price)} per month. Enter that amount.`, 400);
+  if (Number(body.amount) !== price) throw new AppError(`The ${plan.name} plan costs ${fmtNaira(price)} per month. Enter that amount.`, 400);
   if (await Payment.exists({ ...subject, status: PAYMENT_STATUS.PENDING })) {
     throw new AppError('You already have a payment awaiting approval.', 409);
   }
 
   const stored = file ? await storage.storeReceipt(file) : null; // Cloudinary, or null -> database fallback below
   const payment = await Payment.create({
-    ...subject, plan: planKey, amount: plan.price, submittedBy: user._id,
+    ...subject, plan: planKey, amount: price, currency: 'NGN', submittedBy: user._id,
     paymentDate: body.paymentDate, reference: body.reference, description: body.description,
     proof: file ? { originalName: file.originalname, mimeType: file.mimetype, size: file.size, cloudinary: stored?.cloudinary } : undefined,
   });
   if (file && !stored) await ProofFile.create({ payment: payment._id, data: file.buffer, mimeType: file.mimetype, originalName: file.originalname, size: file.size });
-  const sub = await Subscription.create({ ...subject, plan: planKey, amount: plan.price, status: SUB_STATUS.PENDING, payment: payment._id });
+  const sub = await Subscription.create({ ...subject, plan: planKey, amount: price, currency: 'NGN', status: SUB_STATUS.PENDING, payment: payment._id });
   payment.subscription = sub._id;
   await payment.save();
 
   const orgId = subject.organization;
-  await activity.log({ actor: user, action: 'PAYMENT_SUBMITTED', message: `${user.name} submitted a ${plan.name} payment of ${fmtNaira(plan.price)}`, organization: orgId, entityType: 'Payment', entityId: payment._id });
-  await notifyAdmins({ type: 'PAYMENT_SUBMITTED', title: 'New payment request', message: `${user.name} submitted ${fmtNaira(plan.price)} (${plan.name}).`, link: '/admin/payments' });
+  await activity.log({ actor: user, action: 'PAYMENT_SUBMITTED', message: `${user.name} submitted a ${plan.name} payment of ${fmtNaira(price)}`, organization: orgId, entityType: 'Payment', entityId: payment._id });
+  await notifyAdmins({ type: 'PAYMENT_SUBMITTED', title: 'New payment request', message: `${user.name} submitted ${fmtNaira(price)} (${plan.name}).`, link: '/admin/payments' });
   return payment;
 }
 
-async function approvePayment(paymentId, admin) {
+// admin = null means the system approved it (a Paystack payment confirmed by Paystack itself). allowFrom lets a late online
+// payment revive a checkout that was already marked Cancelled.
+async function approvePayment(paymentId, admin, { allowFrom = [PAYMENT_STATUS.PENDING] } = {}) {
   const now = new Date();
   // Atomic status flip prevents double-approval.
   const payment = await Payment.findOneAndUpdate(
-    { _id: paymentId, status: PAYMENT_STATUS.PENDING },
-    { status: PAYMENT_STATUS.APPROVED, reviewedBy: admin._id, reviewedAt: now },
+    { _id: paymentId, status: { $in: allowFrom } },
+    { status: PAYMENT_STATUS.APPROVED, reviewedBy: admin?._id, reviewedAt: now },
     { new: true }
   );
   if (!payment) throw new AppError('This payment was not found or has already been reviewed.', 409);
@@ -127,8 +135,8 @@ async function approvePayment(paymentId, admin) {
   await payment.save();
 
   const recipients = await recipientsFor(subject);
-  await notify(recipients, { type: 'PAYMENT_APPROVED', title: 'Payment approved', message: `Your payment of ${fmtNaira(payment.amount)} was approved. Your subscription is active until ${fmtDate(endDate)}.`, link: '/subscription' });
-  await activity.log({ actor: admin, action: 'PAYMENT_APPROVED', message: `Payment of ${fmtNaira(payment.amount)} approved`, organization: subject.organization, entityType: 'Payment', entityId: payment._id });
+  await notify(recipients, { type: 'PAYMENT_APPROVED', title: 'Payment approved', message: `Your payment of ${fmtMoney(payment.amount, payment.currency)} was approved. Your subscription is active until ${fmtDate(endDate)}.`, link: '/subscription' });
+  await activity.log({ actor: admin, action: 'PAYMENT_APPROVED', message: `Payment of ${fmtMoney(payment.amount, payment.currency)} approved${admin ? '' : ' (online, confirmed by Paystack)'}`, organization: subject.organization, entityType: 'Payment', entityId: payment._id });
   await activity.log({ actor: admin, action: 'SUBSCRIPTION_ACTIVATED', message: `${PLANS[payment.plan].name} subscription active ${fmtDate(startDate)} to ${fmtDate(endDate)}`, organization: subject.organization, entityType: 'Subscription', entityId: sub._id });
   return { payment, subscription: sub };
 }

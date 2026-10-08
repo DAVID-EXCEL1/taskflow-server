@@ -8,6 +8,7 @@ const ActivityLog = require('../models/ActivityLog');
 const asyncHandler = require('../utils/asyncHandler');
 const { ROLES, PLANS } = require('../config/constants');
 const { getAccess } = require('../services/subscriptionService');
+const pricing = require('../services/pricingService');
 const { buildScope, overdueClause, upcomingClause } = require('../services/taskService');
 
 const monthKey = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -31,6 +32,7 @@ async function taskStats(scope) {
 const POP = [{ path: 'category', select: 'name color' }, { path: 'assignedTo', select: 'name' }, { path: 'assignedTeam', select: 'name' }];
 
 async function adminDashboard() {
+  const prices = await pricing.getPrices();
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const months = lastMonths(6);
@@ -64,7 +66,7 @@ async function adminDashboard() {
       activeSubscriptions: activeIndividual + activeBusiness,
       expiredSubscriptions: expiredKeys.size, pendingPayments,
       monthRevenue: monthRev[0]?.total || 0,
-      expectedRevenue: activeIndividual * PLANS.INDIVIDUAL.price + activeBusiness * PLANS.BUSINESS.price,
+      expectedRevenue: activeIndividual * prices.INDIVIDUAL.NGN + activeBusiness * prices.BUSINESS.NGN,
     },
     charts: {
       revenue: series(months, revenue),

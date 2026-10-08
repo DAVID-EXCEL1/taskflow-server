@@ -19,6 +19,7 @@ const dash = require('../controllers/dashboardController');
 const pushCtl = require('../controllers/pushController');
 const security = require('../controllers/securityController');
 const account = require('../controllers/accountController');
+const onlinePay = require('../controllers/onlinePaymentController');
 const aiCtl = require('../controllers/aiController');
 const planCtl = require('../controllers/planController');
 
@@ -31,9 +32,11 @@ const ownerOnly = authorize(ORGANIZATION_OWNER);
 const adminOnly = authorize(SUPER_ADMIN);
 
 // ---- Public ----
-router.get('/health', (req, res) => res.json({ ok: true, version: 'update-3-deletion-reuse-cleanup' })); // open /api/health to see which server version is live
+router.get('/health', (req, res) => res.json({ ok: true, version: 'update-4-paystack' })); // open /api/health to see which server version is live
 router.get('/plans', billing.plans);
 router.post('/auth/register', authLimiter, validate(v.register), auth.register);
+// Paystack calls this itself (public on purpose; protected by its signature, checked inside)
+router.post('/webhooks/paystack', onlinePay.webhook);
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);
 router.post('/auth/login/2fa', authLimiter, validate(v.login2fa), security.login2fa);
 router.post('/auth/forgot-password', forgotLimiter, validate(v.forgotPassword), security.forgotPassword);
@@ -119,12 +122,19 @@ router.patch('/users/:id/status', adminOnly, requireTwoFactor, validate(v.status
 router.get('/subscriptions', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), billing.listSubscriptions);
 router.get('/subscriptions/status', billing.myStatus);
 router.post('/subscriptions/run-checks', adminOnly, billing.runChecks);
+router.get('/payments/methods', authorize(INDIVIDUAL, ORGANIZATION_OWNER), onlinePay.methods);
+router.post('/payments/online/start', authLimiter, requirePermission('payments:submit'), onlinePay.start);
+router.post('/payments/online/verify', authLimiter, authorize(INDIVIDUAL, ORGANIZATION_OWNER), validate(v.verifyOnline), onlinePay.verify);
+router.post('/payments/:id/verify-online', adminOnly, onlinePay.adminVerify);
 router.get('/payments', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), billing.listPayments);
 router.post('/payments', requirePermission('payments:submit'), upload.single('proof'), validate(v.payment), billing.submitPayment);
 router.get('/payments/:id/proof', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWNER), billing.proof);
 router.post('/payments/:id/approve', adminOnly, requireTwoFactor, billing.approve);
 router.post('/payments/:id/reject', adminOnly, requireTwoFactor, validate(v.reject), billing.reject);
 router.get('/settings/payment', billing.getPaymentInfo);
+router.get('/settings/billing', adminOnly, onlinePay.billingSettings);
+router.put('/settings/billing', adminOnly, validate(v.billingMethods), onlinePay.setMethods);
+router.put('/settings/prices', adminOnly, requireTwoFactor, validate(v.plansPrices), onlinePay.setPrices);
 router.get('/settings/ai', adminOnly, aiCtl.status);
 router.put('/settings/ai', adminOnly, validate(v.aiSwitch), aiCtl.setEnabled);
 router.post('/settings/ai/test', adminOnly, authLimiter, aiCtl.test);
