@@ -12,6 +12,7 @@ const { escapeRegex, pageParams } = require('../utils/helpers');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
 const crypto = require('crypto');
+const seatService = require('../services/seatService');
 const APP = () => process.env.APP_NAME || 'Taxkflow';
 
 exports.getMine = asyncHandler(async (req, res) => {
@@ -55,6 +56,7 @@ exports.reactivateMember = asyncHandler(async (req, res) => {
   if (!member) throw new AppError('Member not found.', 404);
   if (member.isActive) throw new AppError('This member is already active.', 409);
   if (!member.orgDeactivation?.at) throw new AppError('This account was deactivated by the platform. Please contact support.', 409);
+  await seatService.assertSeatFree(req.user.organization); // coming back takes a seat again
   await User.updateOne({ _id: member._id }, { $set: { isActive: true }, $unset: { orgDeactivation: 1 } });
   await activity.log({ actor: req.user, action: 'MEMBER_REACTIVATED', message: `Reactivated ${member.name}`, organization: req.user.organization, entityType: 'User', entityId: member._id });
   res.json({ success: true, message: `${member.name} can sign in again.` });
@@ -116,6 +118,7 @@ exports.createInvitation = asyncHandler(async (req, res) => {
   // The message is deliberately general so it doesn't confirm who has an account.
   if (await User.exists({ email })) throw new AppError(`This email can't be invited. If the person already uses ${APP()}, they'll need to use a different email address to join.`, 409, { code: 'EMAIL_HAS_ACCOUNT' });
   if (team && !(await Team.exists({ _id: team, organization: orgId }))) throw new AppError('Team not found.', 400);
+  await seatService.assertSeatFree(orgId); // team-size limit of the paid plan (open invitations count too)
   await Invitation.updateMany({ organization: orgId, email, status: INVITE_STATUS.PENDING }, { status: INVITE_STATUS.EXPIRED });
   const invite = await Invitation.create({ organization: orgId, email, team: team || undefined, invitedBy: req.user._id, token: crypto.randomBytes(24).toString('hex'), expiresAt: new Date(Date.now() + 7 * 86400000) });
   await activity.log({ actor: req.user, action: 'MEMBER_INVITED', message: `Invited ${email}`, organization: orgId, entityType: 'Invitation', entityId: invite._id });
@@ -188,7 +191,15 @@ exports.adminGet = asyncHandler(async (req, res) => {
     Payment.find({ organization: org._id }).sort({ createdAt: -1 }).lean(),
     Task.countDocuments({ organization: org._id }),
   ]);
-  res.json({ success: true, data: { ...org, members, teams, subscriptions, payments, taskCount } });
+  res.json({ success: true, data: { ...org, members, teams, subscriptions, payments, taskCount, seats: await seatService.seatInfo(org._id) } });
+});
+exports.adminSetSeatLimit = asyncHandler(async (req, res) => {
+  const org = await Organization.findById(req.params.id);
+  if (!org) throw new AppError('Organization not found.', 404);
+  if (req.body.limit === null) org.seatLimitOverride = undefined; else org.seatLimitOverride = req.body.limit;
+  await org.save();
+  await activity.log({ actor: req.user, action: 'SEAT_LIMIT_SET', message: req.body.limit === null ? `Removed the custom member limit of ${org.name}` : `Set a custom member limit of ${req.body.limit} for ${org.name}`, organization: org._id, entityType: 'Organization', entityId: org._id });
+  res.json({ success: true, data: await seatService.seatInfo(org._id), message: req.body.limit === null ? 'Custom limit removed.' : `Members limit set to ${req.body.limit}.` });
 });
 exports.adminSetStatus = asyncHandler(async (req, res) => {
   const org = await Organization.findByIdAndUpdate(req.params.id, { isActive: req.body.isActive }, { new: true });

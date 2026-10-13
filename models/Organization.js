@@ -9,6 +9,7 @@ const schema = new mongoose.Schema(
     owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     isActive: { type: Boolean, default: true },
     deletion: { requestedAt: Date, scheduledFor: Date, reason: String, purging: Boolean, purgingAt: Date }, // set while an account is in its 30-day grace period
+    seatLimitOverride: Number, // set by the platform admin for custom deals (e.g. teams above the largest band)
     aiEnabled: { type: Boolean, default: false }, // set by the owner; covers the whole organization
   },
   { timestamps: true }

@@ -6,6 +6,9 @@ const schema = new mongoose.Schema(
     amount: { type: Number, required: true },
     currency: { type: String, default: 'NGN' },
     method: { type: String, enum: ['bank_transfer', 'paystack'], default: 'bank_transfer', index: true },
+    kind: { type: String, enum: ['subscription', 'upgrade'], default: 'subscription' },
+    seats: Number, // Business: how many active people the price was worked out for
+    upgrade: { subscription: mongoose.Schema.Types.ObjectId, toMaxMembers: Number, toBandPrice: Number },
     // Online payments: Paystack's reference for the checkout, and what Paystack told us once it was paid.
     gateway: { provider: String, reference: { type: String, index: true, sparse: true }, paidAt: Date, channel: String },
     paymentDate: { type: Date, required: true },

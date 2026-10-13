@@ -34,6 +34,7 @@ exports.register = asyncHandler(async (req, res) => {
     const invite = await Invitation.findOne({ token: inviteToken, status: INVITE_STATUS.PENDING });
     if (!invite || invite.expiresAt < new Date()) throw new AppError('This invitation is invalid or has expired.', 400);
     if (invite.email !== email) throw new AppError(`This invitation was sent to ${invite.email}. Register with that email address.`, 400);
+    await require('../services/seatService').assertSeatFree(invite.organization, { includePending: false }); // the invitation itself is the open seat
     const user = await User.create({ name, email, password, role: ROLES.ORGANIZATION_MEMBER, organization: invite.organization, teams: invite.team ? [invite.team] : [], ...terms() });
     invite.status = INVITE_STATUS.ACCEPTED; invite.respondedAt = new Date(); await invite.save();
     const org = await Organization.findById(invite.organization);

@@ -5,6 +5,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 // Atomically add 1 if still under `limit`. Returns the new count, or null when the limit is reached.
 async function bump(key, limit) {
+  if (!(limit > 0)) return null; // a limit of 0 means "none" - never let the first call slip through
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const doc = await AiUsage.findOneAndUpdate({ key, day: today(), count: { $lt: limit } }, { $inc: { count: 1 }, $setOnInsert: { createdAt: new Date() } }, { upsert: true, new: true });
@@ -17,14 +18,25 @@ async function bump(key, limit) {
 }
 const dec = (key) => AiUsage.updateOne({ key, day: today(), count: { $gt: 0 } }, { $inc: { count: -1 } });
 
-// Takes one unit from the platform-wide daily allowance AND the user's own allowance.
-async function consume(userId, userLimit) {
+// One use comes out of: the platform-wide allowance, the team's shared daily pool (Business), AND the person's own allowance.
+// If any of them is full the others are given back, so a refused attempt never costs anyone.
+async function consume(userId, userLimit, org = null) {
   const g = await bump('global', limits().global);
   if (g == null) return { ok: false, why: 'global' };
+  let o = null;
+  if (org) {
+    o = await bump(`o:${org.id}`, org.limit);
+    if (o == null) { await dec('global'); return { ok: false, why: 'org' }; }
+  }
   const u = await bump(`u:${userId}`, userLimit);
-  if (u == null) { await dec('global'); return { ok: false, why: 'user' }; }
-  return { ok: true, used: u, remaining: userLimit - u };
+  if (u == null) { await dec('global'); if (org) await dec(`o:${org.id}`); return { ok: false, why: 'user' }; }
+  return { ok: true, used: u, remaining: Math.min(userLimit - u, org ? org.limit - o : Infinity) };
 }
-const refund = async (userId) => { await dec(`u:${userId}`); await dec('global'); }; // the provider failed: the user should not lose a use
-async function usedToday(userId) { const d = await AiUsage.findOne({ key: `u:${userId}`, day: today() }).lean(); return d?.count || 0; }
-module.exports = { limits, consume, refund, usedToday };
+const refund = async (userId, orgId) => { await dec(`u:${userId}`); await dec('global'); if (orgId) await dec(`o:${orgId}`); }; // the provider failed: nobody should lose a use
+async function remaining(userId, userLimit, org = null) {
+  const [u, o] = await Promise.all([usedToday(userId), org ? usedKey(`o:${org.id}`) : 0]);
+  return Math.max(Math.min(userLimit - u, org ? org.limit - o : Infinity), 0);
+}
+async function usedKey(key) { const d = await AiUsage.findOne({ key, day: today() }).lean(); return d?.count || 0; }
+async function usedToday(userId) { return usedKey(`u:${userId}`); }
+module.exports = { limits, consume, refund, remaining, usedToday };

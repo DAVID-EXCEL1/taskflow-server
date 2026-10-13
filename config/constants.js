@@ -21,7 +21,7 @@ const PLANS = Object.freeze({
     price: 5000,
     currency: 'NGN',
     durationMonths: 1,
-    features: ['Everything in Personal', 'Teams inside your organization', 'Invite unlimited members', 'Assign tasks to people or teams', 'Organization dashboard and activity log'],
+    features: ['Everything in Personal', 'Teams inside your organization', 'Invite your team (priced by team size)', 'Assign tasks to people or teams', 'Organization dashboard and activity log'],
   },
 });
 

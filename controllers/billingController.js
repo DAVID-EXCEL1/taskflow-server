@@ -26,8 +26,14 @@ const scopeFor = (u) => {
 };
 
 exports.plans = asyncHandler(async (req, res) => {
-  const prices = await pricing.getPrices();
-  res.json({ success: true, data: Object.values(PLANS).map((p) => ({ ...p, price: prices[p.key].NGN, prices: prices[p.key] })) });
+  const [individual, bands, currencies] = await Promise.all([pricing.getIndividual(), pricing.getBands(), pricing.enabledCurrencies()]);
+  res.json({
+    success: true,
+    // `price` is the headline (Business = the smallest size, "from"), `prices` has every currency.
+    data: [{ ...PLANS.INDIVIDUAL, price: individual.NGN, prices: individual }, { ...PLANS.BUSINESS, price: bands[0].prices.NGN, prices: bands[0].prices, from: true }],
+    bands: bands.map((b) => ({ maxMembers: b.maxMembers, label: pricing.bandLabel(bands, b), prices: b.prices })),
+    currencies, customAbove: bands[bands.length - 1].maxMembers,
+  });
 });
 
 exports.myStatus = asyncHandler(async (req, res) => res.json({ success: true, data: await svc.getAccess(req.user) }));

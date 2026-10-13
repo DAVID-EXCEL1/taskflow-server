@@ -32,7 +32,7 @@ const ownerOnly = authorize(ORGANIZATION_OWNER);
 const adminOnly = authorize(SUPER_ADMIN);
 
 // ---- Public ----
-router.get('/health', (req, res) => res.json({ ok: true, version: 'update-4-paystack' })); // open /api/health to see which server version is live
+router.get('/health', (req, res) => res.json({ ok: true, version: 'update-5-pricing-bands' })); // open /api/health to see which server version is live
 router.get('/plans', billing.plans);
 router.post('/auth/register', authLimiter, validate(v.register), auth.register);
 // Paystack calls this itself (public on purpose; protected by its signature, checked inside)
@@ -88,6 +88,7 @@ router.get('/organizations', adminOnly, orgs.adminList);
 router.get('/organizations/me', orgUsers, orgs.getMine);
 router.put('/organizations/me', ownerOnly, writable, validate(v.org), orgs.updateMine);
 router.get('/organizations/:id', adminOnly, orgs.adminGet);
+router.patch('/organizations/:id/seat-limit', adminOnly, requireTwoFactor, validate(v.seatLimit), orgs.adminSetSeatLimit);
 router.patch('/organizations/:id/status', adminOnly, requireTwoFactor, validate(v.status), orgs.adminSetStatus);
 
 router.get('/members', orgUsers, orgs.listMembers);
@@ -123,7 +124,7 @@ router.get('/subscriptions', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWN
 router.get('/subscriptions/status', billing.myStatus);
 router.post('/subscriptions/run-checks', adminOnly, billing.runChecks);
 router.get('/payments/methods', authorize(INDIVIDUAL, ORGANIZATION_OWNER), onlinePay.methods);
-router.post('/payments/online/start', authLimiter, requirePermission('payments:submit'), onlinePay.start);
+router.post('/payments/online/start', authLimiter, requirePermission('payments:submit'), validate(v.onlineStart), onlinePay.start);
 router.post('/payments/online/verify', authLimiter, authorize(INDIVIDUAL, ORGANIZATION_OWNER), validate(v.verifyOnline), onlinePay.verify);
 router.post('/payments/:id/verify-online', adminOnly, onlinePay.adminVerify);
 router.get('/payments', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATION_OWNER, ORGANIZATION_MEMBER), billing.listPayments);

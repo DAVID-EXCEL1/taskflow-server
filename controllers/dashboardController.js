@@ -8,7 +8,6 @@ const ActivityLog = require('../models/ActivityLog');
 const asyncHandler = require('../utils/asyncHandler');
 const { ROLES, PLANS } = require('../config/constants');
 const { getAccess } = require('../services/subscriptionService');
-const pricing = require('../services/pricingService');
 const { buildScope, overdueClause, upcomingClause } = require('../services/taskService');
 
 const monthKey = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -32,7 +31,6 @@ async function taskStats(scope) {
 const POP = [{ path: 'category', select: 'name color' }, { path: 'assignedTo', select: 'name' }, { path: 'assignedTeam', select: 'name' }];
 
 async function adminDashboard() {
-  const prices = await pricing.getPrices();
   const now = new Date();
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   const months = lastMonths(6);
@@ -43,10 +41,10 @@ async function adminDashboard() {
     User.countDocuments({ role: ROLES.INDIVIDUAL }),
     Organization.countDocuments(),
     Payment.countDocuments({ status: 'Pending' }),
-    Subscription.find({ status: 'Active', 'holder.deleted': { $ne: true }, startDate: { $lte: now }, endDate: { $gt: now } }).select('plan user organization').lean(),
+    Subscription.find({ status: 'Active', 'holder.deleted': { $ne: true }, startDate: { $lte: now }, endDate: { $gt: now } }).select('plan user organization amount currency source').lean(),
     Subscription.find({ status: 'Active', 'holder.deleted': { $ne: true } }).select('user organization endDate startDate').lean(),
-    Payment.aggregate([{ $match: { status: 'Approved', reviewedAt: { $gte: monthStart } } }, { $group: { _id: null, total: { $sum: '$amount' } } }]),
-    Payment.aggregate([{ $match: { status: 'Approved', reviewedAt: { $gte: since } } }, { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$reviewedAt' } }, total: { $sum: '$amount' } } }]),
+    Payment.aggregate([{ $match: { status: 'Approved', reviewedAt: { $gte: monthStart } } }, { $group: { _id: { $ifNull: ['$currency', 'NGN'] }, total: { $sum: '$amount' } } }]),
+    Payment.aggregate([{ $match: { status: 'Approved', reviewedAt: { $gte: since } } }, { $addFields: { cur: { $ifNull: ['$currency', 'NGN'] } } }, { $match: { cur: 'NGN' } }, { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$reviewedAt' } }, total: { $sum: '$amount' } } }]), // the chart is in naira; other currencies are listed separately
     User.aggregate([{ $match: { role: { $ne: ROLES.SUPER_ADMIN }, createdAt: { $gte: since } } }, { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$createdAt' } }, total: { $sum: 1 } } }]),
     Payment.aggregate([{ $group: { _id: '$status', n: { $sum: 1 } } }]),
     Payment.aggregate([{ $match: { status: 'Approved', reviewedAt: { $gte: since } } }, { $group: { _id: { m: { $dateToString: { format: '%Y-%m', date: '$reviewedAt' } }, plan: '$plan' }, n: { $sum: 1 } } }]),
@@ -56,6 +54,9 @@ async function adminDashboard() {
   const keyOf = (s) => (s.user ? `u${s.user}` : `o${s.organization}`);
   const currentKeys = new Set(activeSubs.map(keyOf));
   const expiredKeys = new Set(allActive.filter((s) => !currentKeys.has(keyOf(s))).map(keyOf));
+  const expectedByCurrency = {};
+  const countedSubjects = new Set();
+  for (const s of activeSubs) { if (s.source === 'admin_grant' || countedSubjects.has(keyOf(s))) continue; countedSubjects.add(keyOf(s)); const c = s.currency || 'NGN'; expectedByCurrency[c] = (expectedByCurrency[c] || 0) + (s.amount || 0); }
   const activeIndividual = new Set(activeSubs.filter((s) => s.plan === 'INDIVIDUAL').map(keyOf)).size;
   const activeBusiness = new Set(activeSubs.filter((s) => s.plan === 'BUSINESS').map(keyOf)).size;
 
@@ -65,8 +66,11 @@ async function adminDashboard() {
       activeIndividual: activeIndividual, activeBusiness: activeBusiness,
       activeSubscriptions: activeIndividual + activeBusiness,
       expiredSubscriptions: expiredKeys.size, pendingPayments,
-      monthRevenue: monthRev[0]?.total || 0,
-      expectedRevenue: activeIndividual * prices.INDIVIDUAL.NGN + activeBusiness * prices.BUSINESS.NGN,
+      monthRevenue: monthRev.find((r) => r._id === 'NGN')?.total || 0,
+      monthRevenueByCurrency: Object.fromEntries(monthRev.map((r) => [r._id, r.total])),
+      // Expected = what the people who are subscribed RIGHT NOW actually paid (free days given by you are not revenue).
+      expectedRevenue: expectedByCurrency.NGN || 0,
+      expectedByCurrency,
     },
     charts: {
       revenue: series(months, revenue),

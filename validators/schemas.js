@@ -66,8 +66,10 @@ const aiOptIn = z.object({ enabled: z.boolean() });
 const deleteRequest = z.object({ password: z.string().min(1, 'Enter your password'), code: z.string().trim().max(20).optional(), confirm: z.string().trim().min(1, 'Type the confirmation text').max(200), reason: optStr(300) });
 const purgeNow = z.object({ confirm: z.literal('DELETE', { errorMap: () => ({ message: 'Type DELETE to confirm' }) }) });
 const memberDeactivate = z.object({ reason: optStr(300) });
-const priceCell = z.number({ invalid_type_error: 'Enter a number' });
-const plansPrices = z.object({ INDIVIDUAL: z.object({ NGN: priceCell }), BUSINESS: z.object({ NGN: priceCell }) });
+const pricesMap = z.record(z.string(), z.number().nullable().optional()); // strict checking (limits, decimals, consistency) happens in pricingService
+const plansPrices = z.object({ individual: pricesMap, bands: z.array(z.object({ maxMembers: z.number(), prices: pricesMap, aiPerUser: z.number().optional(), aiOrgDaily: z.number().optional() })).min(1).max(12) });
+const onlineStart = z.object({ currency: z.string().trim().length(3).optional(), upgradeTo: z.number().int().positive().optional() });
+const seatLimit = z.object({ limit: z.number().int().min(1).max(100000).nullable() });
 const billingMethods = z.object({ onlineEnabled: z.boolean().optional(), bankTransferEnabled: z.boolean().optional() }).refine((d) => d.onlineEnabled !== undefined || d.bankTransferEnabled !== undefined, 'Nothing to change');
 const verifyOnline = z.object({ reference: z.string().trim().min(5).max(80) });
 const forgotPassword = z.object({ email });
@@ -83,4 +85,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, plansPrices, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };

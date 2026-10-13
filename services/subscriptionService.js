@@ -10,6 +10,7 @@ const { ROLES, PLANS, SUB_STATUS, PAYMENT_STATUS, RENEWAL_WINDOW_DAYS } = requir
 const { notify, notifyAdmins } = require('./notificationService');
 const activity = require('./activityService');
 const pricing = require('./pricingService');
+const User = require('../models/User');
 
 const fmtNaira = (n) => `₦${Number(n).toLocaleString('en-NG')}`;
 const fmtMoney = (n, currency) => pricing.fmtMoney(n, currency);
@@ -45,7 +46,10 @@ async function getAccess(user) {
   ]);
 
   const base = {
-    plan: plan.key, planName: plan.name, price: await pricing.getPrice(plan.key), currency: 'NGN',
+    plan: plan.key, planName: plan.name,
+    // Business shows the price of the size they are on; Personal the flat price.
+    price: plan.key === 'BUSINESS' ? (current?.bandPrice ?? latest?.bandPrice ?? (await pricing.getPrice('BUSINESS'))) : await pricing.getPrice(plan.key),
+    currency: current?.currency || latest?.currency || 'NGN', maxMembers: current?.maxMembers ?? null,
     hasPendingPayment: !!pending,
     canRenew: !pending,
     paidUntil: latest?.endDate || null,
@@ -81,7 +85,10 @@ async function submitPayment(user, body, file) {
   const plan = PLANS[planKey];
   const methods = await pricing.getMethods();
   if (!methods.bankTransfer) throw new AppError('Bank transfer is not available right now. Please pay online.', 403);
-  const price = await pricing.getPrice(planKey);
+  // Business is priced by team size: every active person in the organization (owner included) counts.
+  const seatCount = planKey === 'BUSINESS' ? await User.countDocuments({ organization: subject.organization, isActive: true }) : 1;
+  const price = await pricing.getPrice(planKey, 'NGN', seatCount);
+  const band = planKey === 'BUSINESS' ? pricing.bandForSeats(await pricing.getBands(), Math.max(seatCount, 1)) : null;
 
   if (file && !hasValidSignature(file)) throw new AppError('That file is not a valid JPG, PNG, WEBP or PDF.', 400);
   const access = await getAccess(user);
@@ -94,12 +101,12 @@ async function submitPayment(user, body, file) {
 
   const stored = file ? await storage.storeReceipt(file) : null; // Cloudinary, or null -> database fallback below
   const payment = await Payment.create({
-    ...subject, plan: planKey, amount: price, currency: 'NGN', submittedBy: user._id,
+    ...subject, plan: planKey, amount: price, currency: 'NGN', seats: seatCount, submittedBy: user._id,
     paymentDate: body.paymentDate, reference: body.reference, description: body.description,
     proof: file ? { originalName: file.originalname, mimeType: file.mimetype, size: file.size, cloudinary: stored?.cloudinary } : undefined,
   });
   if (file && !stored) await ProofFile.create({ payment: payment._id, data: file.buffer, mimeType: file.mimetype, originalName: file.originalname, size: file.size });
-  const sub = await Subscription.create({ ...subject, plan: planKey, amount: price, currency: 'NGN', status: SUB_STATUS.PENDING, payment: payment._id });
+  const sub = await Subscription.create({ ...subject, plan: planKey, amount: price, currency: 'NGN', maxMembers: band?.maxMembers, bandPrice: price, status: SUB_STATUS.PENDING, payment: payment._id });
   payment.subscription = sub._id;
   await payment.save();
 
@@ -107,6 +114,20 @@ async function submitPayment(user, body, file) {
   await activity.log({ actor: user, action: 'PAYMENT_SUBMITTED', message: `${user.name} submitted a ${plan.name} payment of ${fmtNaira(price)}`, organization: orgId, entityType: 'Payment', entityId: payment._id });
   await notifyAdmins({ type: 'PAYMENT_SUBMITTED', title: 'New payment request', message: `${user.name} submitted ${fmtNaira(price)} (${plan.name}).`, link: '/admin/payments' });
   return payment;
+}
+
+// Moving to a bigger team size part-way through a paid month: the period dates stay, only the size changes.
+async function applyUpgrade(payment, admin, now) {
+  const up = payment.upgrade || {};
+  const sub = await Subscription.findOneAndUpdate({ _id: up.subscription, status: SUB_STATUS.ACTIVE }, { $set: { maxMembers: up.toMaxMembers, bandPrice: up.toBandPrice, upgradedAt: now } }, { new: true });
+  const subject = subjectOf(payment);
+  if (!sub) { // paid, but the subscription it belonged to is gone: a human must look at it
+    await notifyAdmins({ type: 'UPGRADE_UNAPPLIED', title: 'Paid upgrade needs attention', message: `An upgrade payment of ${fmtMoney(payment.amount, payment.currency)} was received but its subscription is no longer active. Please check it.`, link: '/admin/payments' });
+    return { payment, subscription: null };
+  }
+  await notify(await recipientsFor(subject), { type: 'PLAN_UPGRADED', title: 'Plan upgraded', message: `Your plan now covers up to ${up.toMaxMembers} people.`, link: '/subscription' });
+  await activity.log({ actor: admin, action: 'PLAN_UPGRADED', message: `Plan upgraded to up to ${up.toMaxMembers} people (${fmtMoney(payment.amount, payment.currency)})`, organization: subject.organization, entityType: 'Subscription', entityId: sub._id });
+  return { payment, subscription: sub };
 }
 
 // admin = null means the system approved it (a Paystack payment confirmed by Paystack itself). allowFrom lets a late online
@@ -120,6 +141,7 @@ async function approvePayment(paymentId, admin, { allowFrom = [PAYMENT_STATUS.PE
     { new: true }
   );
   if (!payment) throw new AppError('This payment was not found or has already been reviewed.', 409);
+  if (payment.kind === 'upgrade') return applyUpgrade(payment, admin, now);
 
   const subject = subjectOf(payment);
   const latest = await Subscription.findOne({ ...subject, status: SUB_STATUS.ACTIVE }).sort({ endDate: -1 });
