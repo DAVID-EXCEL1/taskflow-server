@@ -20,6 +20,7 @@ const pushCtl = require('../controllers/pushController');
 const security = require('../controllers/securityController');
 const account = require('../controllers/accountController');
 const onlinePay = require('../controllers/onlinePaymentController');
+const companyCtl = require('../controllers/companyController');
 const aiCtl = require('../controllers/aiController');
 const planCtl = require('../controllers/planController');
 
@@ -37,6 +38,7 @@ router.get('/plans', billing.plans);
 router.post('/auth/register', authLimiter, validate(v.register), auth.register);
 // Paystack calls this itself (public on purpose; protected by its signature, checked inside)
 router.post('/webhooks/paystack', onlinePay.webhook);
+router.get('/company', companyCtl.get); // public: business + support contact details
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);
 router.post('/auth/login/2fa', authLimiter, validate(v.login2fa), security.login2fa);
 router.post('/auth/forgot-password', forgotLimiter, validate(v.forgotPassword), security.forgotPassword);
@@ -133,6 +135,7 @@ router.get('/payments/:id/proof', authorize(SUPER_ADMIN, INDIVIDUAL, ORGANIZATIO
 router.post('/payments/:id/approve', adminOnly, requireTwoFactor, billing.approve);
 router.post('/payments/:id/reject', adminOnly, requireTwoFactor, validate(v.reject), billing.reject);
 router.get('/settings/payment', billing.getPaymentInfo);
+router.put('/settings/company', adminOnly, validate(v.companyBody), companyCtl.set);
 router.get('/settings/billing', adminOnly, onlinePay.billingSettings);
 router.put('/settings/billing', adminOnly, validate(v.billingMethods), onlinePay.setMethods);
 router.put('/settings/prices', adminOnly, requireTwoFactor, validate(v.plansPrices), onlinePay.setPrices);
