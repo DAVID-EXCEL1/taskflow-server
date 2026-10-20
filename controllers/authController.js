@@ -15,7 +15,7 @@ const { notify } = require('../services/notificationService');
 const { signChallenge } = require('../middleware/auth');
 const email = require('../services/emailService');
 
-const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, twoFactorEnabled: !!u.twoFactor?.enabled, deletionScheduledFor: u.deletion?.scheduledFor || null, timezone: u.timezone || 'Africa/Lagos', role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
+const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, twoFactorEnabled: !!u.twoFactor?.enabled, deletionScheduledFor: u.deletion?.scheduledFor || null, timezone: u.timezone || 'Africa/Lagos', overdueNudge: { everyMinutes: u.overdueNudge?.everyMinutes || 0, quietFrom: u.overdueNudge?.quietFrom ?? 22, quietTo: u.overdueNudge?.quietTo ?? 7 }, role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
 
 async function buildSession(userDoc) {
   const user = userDoc.toObject ? userDoc.toObject() : userDoc;
@@ -82,6 +82,13 @@ exports.login = asyncHandler(async (req, res) => {
 });
 
 exports.me = asyncHandler(async (req, res) => res.json({ success: true, ...(await buildSession(req.user)) }));
+
+exports.updateOverdueNudge = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
+  user.overdueNudge = { everyMinutes: req.body.everyMinutes, quietFrom: req.body.quietFrom, quietTo: req.body.quietTo };
+  await user.save();
+  res.json({ success: true, data: publicUser(user), message: req.body.everyMinutes ? 'Overdue reminders saved.' : 'Overdue reminders are off.' });
+});
 
 exports.updateProfile = asyncHandler(async (req, res) => {
   const user = await User.findByIdAndUpdate(req.user._id, { $set: req.body }, { new: true, runValidators: true });

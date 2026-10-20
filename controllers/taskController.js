@@ -9,6 +9,7 @@ const { nextOccurrence } = require('../utils/recurrence');
 const { applyReminder } = require('../services/taskReminderService');
 const OPEN = ['Pending', 'In Progress'];
 const svc = require('../services/taskService');
+const recScope = require('../utils/recurrenceScope');
 const activity = require('../services/activityService');
 const { notify } = require('../services/notificationService');
 
@@ -109,7 +110,10 @@ exports.update = asyncHandler(async (req, res) => {
   const task = await findScoped(req.user, req.params.id);
   const allowed = svc.editableFields(req.user, task);
   const changes = {};
+  // For a repeating task the person chooses: only this occurrence ("this") or this and the future ones ("future", the default).
+  const scope = req.body.scope === 'this' ? 'this' : 'future';
   for (const [k, v] of Object.entries(req.body)) {
+    if (k === 'scope') continue;
     if (!allowed.includes(k)) throw new AppError(`You are not allowed to change "${k}" on this task.`, 403);
     changes[k] = v;
   }
@@ -120,12 +124,13 @@ exports.update = asyncHandler(async (req, res) => {
   const history = svc.diffHistory(task, changes, req.user);
   const wasAssignedTo = String(task.assignedTo || ''); const wasTeam = String(task.assignedTeam || '');
   const wasStatus = task.status;
+  recScope.captureTemplate(task, changes); // before the edit: remember what the future occurrences should keep
   for (const [k, v] of Object.entries(changes)) task[k] = v === '' ? undefined : v;
   if ('dueDate' in changes && !changes.dueDate && !('dueHasTime' in changes)) task.dueHasTime = false;
   if ('recurrence' in changes || 'dueDate' in changes) {
     if (task.recurrence?.frequency && task.recurrence.frequency !== 'none') {
       if (!task.dueDate) throw new AppError('Set a due date to make a task repeat.', 400);
-      task.recurrence.anchor = task.dueDate;
+      if ('recurrence' in changes || scope !== 'this') task.recurrence.anchor = task.dueDate; // moving only this occurrence keeps the rest of the pattern where it was
       if (!task.seriesId) task.seriesId = task._id;
     }
   }
@@ -134,6 +139,8 @@ exports.update = asyncHandler(async (req, res) => {
   // Recompute the reminder only when it, the due date, or open/closed state changed (so a status tweak never re-sends it).
   const openFlip = 'status' in changes && OPEN.includes(changes.status) !== OPEN.includes(wasStatus);
   if ('reminder' in changes || 'dueDate' in changes || 'dueHasTime' in changes || openFlip) applyReminder(task, req.user.timezone);
+  recScope.applyFuture(task, changes, scope);
+  if ('dueDate' in changes || 'status' in changes) task.nudge = { count: 0 }; // a fresh date or status starts the overdue reminders from zero
   if (history.length) task.history.push(...history);
   await task.save();
 
@@ -158,14 +165,14 @@ async function spawnNext(task, actor) {
   // Atomic claim: only the first completion of this task may create a next occurrence, even if it is reopened and completed again.
   const claimed = await Task.findOneAndUpdate({ _id: task._id, recurrenceSpawned: { $ne: true } }, { recurrenceSpawned: true });
   if (!claimed) return null;
-  const r = task.recurrence;
+  const r = task.recurrence; const f = recScope.fieldsForNext(task);
   const next = await Task.create({
-    title: task.title, description: task.description, category: task.category, priority: task.priority, note: task.note,
-    createdBy: task.createdBy, owner: task.owner, organization: task.organization, assignedTo: task.assignedTo, assignedTeam: task.assignedTeam,
+    title: f.title, description: f.description, category: f.category, priority: f.priority, note: task.note,
+    createdBy: task.createdBy, owner: task.owner, organization: task.organization, assignedTo: f.assignedTo, assignedTeam: f.assignedTeam, seriesTemplate: task.seriesTemplate,
     status: 'Pending', date: new Date(), dueDate: due, dueHasTime: task.dueHasTime,
     recurrence: { frequency: r.frequency, interval: r.interval, endDate: r.endDate, anchor: r.anchor || task.dueDate },
     seriesId: task.seriesId || task._id,
-    reminder: task.reminder?.minutesBefore != null ? { minutesBefore: task.reminder.minutesBefore } : undefined,
+    reminder: f.reminder?.minutesBefore != null ? { minutesBefore: f.reminder.minutesBefore } : undefined,
   });
   if (next.reminder?.minutesBefore != null) { applyReminder(next, actor.timezone); await next.save(); }
   await activity.log({ actor, action: 'TASK_CREATED', message: `Next occurrence of repeating task "${task.title}" created`, organization: task.organization, entityType: 'Task', entityId: next._id });

@@ -51,6 +51,7 @@ router.post('/cron/run', pushCtl.cron);
 router.use(protect);
 router.use(deletionGate); // an account in its 30-day deletion period can only view itself and restore
 router.get('/auth/me', auth.me);
+router.put('/auth/overdue-reminders', validate(v.overdueNudge), auth.updateOverdueNudge); // allowed while read-only
 router.put('/auth/profile', validate(v.profile), auth.updateProfile);          // allowed while read-only
 router.put('/auth/password', authLimiter, validate(v.changePassword), auth.changePassword);
 router.post('/auth/2fa/setup', authLimiter, security.setup2fa);

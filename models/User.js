@@ -16,6 +16,8 @@ const userSchema = new mongoose.Schema(
     deletion: { requestedAt: Date, scheduledFor: Date, reason: String, purging: Boolean, purgingAt: Date }, // set while an account is in its 30-day grace period
     // Set when an organization owner deactivates a member (the record is kept; the owner can reactivate).
     orgDeactivation: { at: Date, by: mongoose.Schema.Types.ObjectId, byName: String, reason: String },
+    // Overdue reminders: off by default; the person chooses how often (minutes: 0 = off, 5, 15, 30, 60, 120) and the quiet hours.
+    overdueNudge: { everyMinutes: { type: Number, default: 0 }, quietFrom: { type: Number, default: 22 }, quietTo: { type: Number, default: 7 } },
     aiOptIn: { type: Boolean, default: false }, // consent for AI suggestions (individuals; owners set it for their organization)
     aiOptInAt: Date,
     termsAcceptedAt: Date, // when they ticked "I agree" at sign-up

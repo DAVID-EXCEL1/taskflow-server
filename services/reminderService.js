@@ -9,6 +9,7 @@ const { runTaskReminders } = require('./taskReminderService');
 const { runAccountPurges } = require('./accountDeletionService');
 const { runCleanup } = require('./cleanupService');
 const { reconcile: reconcileOnlinePayments } = require('./onlinePaymentService');
+const { runOverdueNudges } = require('./overdueNudgeService');
 
 const subjectOf = (d) => (d.user ? { user: d.user } : { organization: d.organization });
 
@@ -56,11 +57,12 @@ async function runScheduledJobs() {
     const subscriptionNotices = await runSubscriptionChecks();
     const taskReminders = await runTaskReminders();
     const accountsDeleted = await runAccountPurges();
+    const overdueNudges = await runOverdueNudges().catch((e) => { console.error('Overdue reminders failed:', e.message); return null; });
     // Safety net for Paystack: activate payments whose confirmation was missed, and clear abandoned checkouts.
     const onlinePayments = await reconcileOnlinePayments().catch((e) => { console.error('Online payment check failed:', e.message); return null; });
     // Housekeeping must never break the reminders above, so a failure here is only logged.
     const cleanup = await runCleanup().catch((e) => { console.error('Cleanup failed:', e.message); return null; });
-    return { subscriptionNotices, taskReminders, accountsDeleted, ...(onlinePayments ? { onlinePayments } : {}), ...(cleanup ? { cleanup } : {}) };
+    return { subscriptionNotices, taskReminders, accountsDeleted, ...(overdueNudges ? { overdueNudges } : {}), ...(onlinePayments ? { onlinePayments } : {}), ...(cleanup ? { cleanup } : {}) };
   } finally { running = false; }
 }
 

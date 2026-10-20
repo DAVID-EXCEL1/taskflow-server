@@ -40,7 +40,8 @@ const task = z.object({
   status: z.enum(TASK_STATUSES).optional(),
   date: optDate, dueDate: optDate, dueHasTime: z.boolean().optional(), recurrence, reminder,
 });
-const taskUpdate = task.partial();
+const taskUpdate = task.partial().extend({ scope: z.enum(['this', 'future']).optional() });
+const overdueNudge = z.object({ everyMinutes: z.number().int().refine((n) => [0, 5, 15, 30, 60, 120].includes(n), 'Choose off, 5, 15, 30, 60 or 120 minutes'), quietFrom: z.number().int().min(0).max(23), quietTo: z.number().int().min(0).max(23) });
 
 const category = z.object({ name: z.string().trim().min(1, 'Name is required').max(40), color: z.string().regex(/^#[0-9a-f]{6}$/i, 'Use a hex colour').optional() });
 const team = z.object({ name: z.string().trim().min(2, 'Team name is required').max(80), description: optStr(500), leader: optId });
@@ -86,4 +87,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, overdueNudge, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };

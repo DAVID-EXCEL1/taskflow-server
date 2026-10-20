@@ -33,6 +33,10 @@ const schema = new mongoose.Schema(
       anchor: Date,
     },
     seriesId: { type: mongoose.Schema.Types.ObjectId, index: true },
+    // What FUTURE occurrences are copied from (title, priority...). Lets an edit apply to "this one only" or "all future ones".
+    seriesTemplate: mongoose.Schema.Types.Mixed,
+    // Overdue reminders already sent for this task (reset when its date or status changes).
+    nudge: { count: { type: Number, default: 0 }, lastAt: Date },
     // Reminders: minutesBefore (null = none). remindAt is computed by the server; reminderSent prevents repeats.
     reminder: { minutesBefore: { type: Number, min: 0, max: 10080 } },
     remindAt: { type: Date, index: true },
