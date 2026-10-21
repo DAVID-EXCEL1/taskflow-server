@@ -74,6 +74,13 @@ const seatLimit = z.object({ limit: z.number().int().min(1).max(100000).nullable
 const billingMethods = z.object({ onlineEnabled: z.boolean().optional(), bankTransferEnabled: z.boolean().optional() }).refine((d) => d.onlineEnabled !== undefined || d.bankTransferEnabled !== undefined, 'Nothing to change');
 const verifyOnline = z.object({ reference: z.string().trim().min(5).max(80) });
 const companyBody = z.object({ name: z.string(), email: z.string().optional(), phone: z.string().optional(), whatsapp: z.string().optional(), address: z.string().optional(), website: z.string().optional(), supportHours: z.string().optional(), vatRate: z.number().optional(), taxId: z.string().optional() });
+const verifyEmailToken = z.object({ token: z.string().min(20).max(200) });
+const emailPrefs = z.object({ enabled: z.boolean().optional(), reminders: z.boolean().optional(), subscription: z.boolean().optional(), overdueDigest: z.boolean().optional(), assignments: z.boolean().optional() }).strict().refine((d) => Object.keys(d).length > 0, 'Nothing to change');
+const googleLogin = z.object({ credential: z.string().min(20).max(4000) });
+const googleComplete = z.object({
+  signupToken: z.string().min(20).max(4000), accountType: z.enum(['PERSONAL', 'BUSINESS']), organization: z.object(orgFields).optional(),
+  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
+}).refine((d) => d.accountType !== 'BUSINESS' || !!d.organization, { message: 'Organization details are required for a Business account', path: ['organization'] });
 const forgotPassword = z.object({ email });
 const resetPassword = z.object({ token: z.string().min(32).max(200), password });
 const login2fa = z.object({ challengeToken: z.string().min(10).max(2000), code: z.string().trim().min(6).max(20) });
@@ -87,4 +94,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, overdueNudge, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, verifyEmailToken, emailPrefs, googleLogin, googleComplete, overdueNudge, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };

@@ -40,6 +40,9 @@ router.post('/auth/register', authLimiter, validate(v.register), auth.register);
 router.post('/webhooks/paystack', onlinePay.webhook);
 router.get('/company', companyCtl.get); // public: business + support contact details
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);
+router.post('/auth/google', authLimiter, validate(v.googleLogin), auth.googleLogin);
+router.post('/auth/google/complete', authLimiter, validate(v.googleComplete), auth.googleComplete);
+router.post('/auth/verify-email', authLimiter, validate(v.verifyEmailToken), auth.verifyEmail);
 router.post('/auth/login/2fa', authLimiter, validate(v.login2fa), security.login2fa);
 router.post('/auth/forgot-password', forgotLimiter, validate(v.forgotPassword), security.forgotPassword);
 router.post('/auth/reset-password', authLimiter, validate(v.resetPassword), security.resetPassword);
@@ -52,6 +55,8 @@ router.use(protect);
 router.use(deletionGate); // an account in its 30-day deletion period can only view itself and restore
 router.get('/auth/me', auth.me);
 router.put('/auth/overdue-reminders', validate(v.overdueNudge), auth.updateOverdueNudge); // allowed while read-only
+router.post('/auth/verify-email/send', authLimiter, auth.sendVerifyEmail);
+router.put('/auth/email-preferences', validate(v.emailPrefs), auth.updateEmailPrefs);
 router.put('/auth/profile', validate(v.profile), auth.updateProfile);          // allowed while read-only
 router.put('/auth/password', authLimiter, validate(v.changePassword), auth.changePassword);
 router.post('/auth/2fa/setup', authLimiter, security.setup2fa);

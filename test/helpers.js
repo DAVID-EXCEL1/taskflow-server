@@ -63,3 +63,14 @@ function fakeSettings() {
 }
 const thrown = async (p) => { try { await p; return null; } catch (e) { return e; } };
 module.exports = { query, matches, fakeModel, fakeSettings, thrown, applyUpdate };
+
+// In-memory stand-in for the small counters collection (AI and email limits). Same "limit reached" behaviour as the real one.
+function fakeUsage() {
+  const AiUsage = require('../models/AiUsage'); const map = new Map();
+  AiUsage.findOneAndUpdate = async (f, u) => { const id = `${f.key}|${f.day}`; const x = map.get(id); if (x) { if (!(x.count < f.count.$lt)) { const e = new Error('dup'); e.code = 11000; throw e; } x.count += u.$inc.count; return x; } const n = { key: f.key, day: f.day, count: u.$inc.count }; map.set(id, n); return n; };
+  AiUsage.updateOne = async (f, u) => { const x = map.get(`${f.key}|${f.day}`); if (x && x.count > 0) x.count += u.$inc.count; return {}; };
+  AiUsage.findOne = (f) => ({ lean: async () => map.get(`${f.key}|${f.day}`) || null });
+  const day = () => new Date().toISOString().slice(0, 10);
+  return { map, clear: () => map.clear(), n: (key, period) => map.get(`${key}|${period || day()}`)?.count || 0, day, month: () => new Date().toISOString().slice(0, 7) };
+}
+module.exports.fakeUsage = fakeUsage;

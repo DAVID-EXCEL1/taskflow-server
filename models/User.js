@@ -18,7 +18,13 @@ const userSchema = new mongoose.Schema(
     orgDeactivation: { at: Date, by: mongoose.Schema.Types.ObjectId, byName: String, reason: String },
     // Overdue reminders: off by default; the person chooses how often (minutes: 0 = off, 5, 15, 30, 60, 120) and the quiet hours.
     overdueNudge: { everyMinutes: { type: Number, default: 0 }, quietFrom: { type: Number, default: 22 }, quietTo: { type: Number, default: 7 } },
-    aiOptIn: { type: Boolean, default: false }, // consent for AI suggestions (individuals; owners set it for their organization)
+    aiOptIn: { type: Boolean, default: false },
+    // Email: confirmed addresses only receive reminder emails. Google sign-in confirms the address by itself.
+    emailVerified: { type: Boolean, default: false },
+    emailVerifiedAt: Date,
+    emailVerify: { tokenHash: { type: String, index: true, sparse: true }, expiresAt: Date, sentAt: Date, sentDay: String, sentCount: Number },
+    emailPrefs: { enabled: Boolean, reminders: Boolean, subscription: Boolean, overdueDigest: Boolean, assignments: Boolean, lastDigestDay: String },
+    googleId: { type: String, index: true, sparse: true }, // consent for AI suggestions (individuals; owners set it for their organization)
     aiOptInAt: Date,
     termsAcceptedAt: Date, // when they ticked "I agree" at sign-up
     termsVersion: String,

@@ -5,6 +5,7 @@
  *   EMAIL_FROM="Taxkflow <no-reply@yourdomain.com>"
  * If not configured, send() logs a warning and returns { sent: false } - it never throws.
  */
+const budget = require('./emailBudget');
 const APP = process.env.APP_NAME || 'Taxkflow';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const parseFrom = (from) => { const m = String(from).match(/^(.*)<(.+)>$/); return m ? { name: m[1].trim().replace(/^"|"$/g, ''), email: m[2].trim() } : { name: APP, email: String(from).trim() }; };
@@ -18,10 +19,12 @@ async function post(url, headers, body) {
   } finally { clearTimeout(t); }
 }
 
-async function send({ to, subject, text, html }) {
+// kind: 'transactional' (default: confirm email, password reset, security) or 'notification' (reminders; held to 70% of the plan limits).
+async function send({ to, subject, text, html, kind = 'transactional', userId }) {
   const provider = String(process.env.EMAIL_PROVIDER || '').toLowerCase();
   const from = process.env.EMAIL_FROM;
   if (!provider || !from) { console.warn(`Email not configured - skipped "${subject}"`); return { sent: false, reason: 'not_configured' }; }
+  if (!(await budget.reserve(kind, userId).catch(() => true))) { console.warn(`Email limit reached - skipped "${subject}"`); return { sent: false, reason: 'budget' }; }
   try {
     if (provider === 'resend') await post('https://api.resend.com/emails', { Authorization: `Bearer ${process.env.RESEND_API_KEY}` }, { from, to: [to], subject, text, html });
     else if (provider === 'brevo') await post('https://api.brevo.com/v3/smtp/email', { 'api-key': process.env.BREVO_API_KEY }, { sender: parseFrom(from), to: [{ email: to }], subject, textContent: text, htmlContent: html });
@@ -29,6 +32,7 @@ async function send({ to, subject, text, html }) {
     return { sent: true };
   } catch (e) {
     console.error(`Email failed ("${subject}"):`, e.message);
+    await budget.refund(kind, userId).catch(() => {});
     return { sent: false, reason: 'error' };
   }
 }
@@ -43,6 +47,9 @@ ${button ? `<p style="margin:24px 0"><a href="${esc(button.url)}" style="backgro
 const p = (t) => `<p style="margin:0 0 12px;font-size:14px;line-height:1.5">${t}</p>`;
 
 const templates = {
+  verifyEmail: (link) => ({ subject: `Confirm your email for ${APP}`, text: `Confirm your email address by opening this link (valid for 24 hours):\n${link}\n\nIf you did not create an account, you can ignore this email.`, html: layout('Confirm your email', p('Press the button to confirm this email address. The link works for 24 hours.'), { url: link, text: 'Confirm my email' }) }),
+  notification: ({ title, message, url }) => ({ subject: title, text: `${message}\n\nOpen ${APP}: ${url}\n\nChoose which emails you get in Profile, Email notifications.`, html: layout(title, p(esc(message)) + p('<span style="color:#6B7A72;font-size:12px">Choose which emails you get in Profile, Email notifications.</span>'), { url, text: `Open ${APP}` }) }),
+  overdueDigest: ({ total, items, url }) => ({ subject: total === 1 ? 'You have 1 overdue task' : `You have ${total} overdue tasks`, text: `${items.map((i) => `- ${i.title} (due ${i.due})`).join('\n')}${total > items.length ? `\n...and ${total - items.length} more` : ''}\n\nMark the finished ones done or set new dates: ${url}\n\nChoose which emails you get in Profile, Email notifications.`, html: layout(total === 1 ? 'You have 1 overdue task' : `You have ${total} overdue tasks`, `<ul style="margin:0 0 12px;padding-left:18px;font-size:14px;line-height:1.6">${items.map((i) => `<li>${esc(i.title)} <span style="color:#6B7A72">(due ${esc(i.due)})</span></li>`).join('')}</ul>${total > items.length ? p(`...and ${total - items.length} more.`) : ''}` + p('Mark the finished ones done or set new dates.') + p('<span style="color:#6B7A72;font-size:12px">Choose which emails you get in Profile, Email notifications.</span>'), { url, text: 'Open my tasks' }) }),
   resetPassword: (link) => ({ subject: `Reset your ${APP} password`, text: `Use this link to choose a new password (valid for 30 minutes):\n${link}\n\nIf you did not ask for this, ignore this email. Your password stays the same.`, html: layout('Reset your password', p('We received a request to reset your password. This link works for 30 minutes and can be used once.') + p('If you did not ask for this, you can ignore this email. Your password will not change.'), { url: link, text: 'Choose a new password' }) }),
   passwordChanged: () => ({ subject: `Your ${APP} password was changed`, text: 'Your password was just changed. If this was not you, reset your password immediately and contact support.', html: layout('Your password was changed', p('Your password was just changed and you were signed out on other devices.') + p('<strong>If this was not you,</strong> reset your password right away and contact support.')) }),
   twoFactorEnabled: () => ({ subject: `Two-factor authentication turned on`, text: 'Two-factor authentication was turned on for your account.', html: layout('Two-factor authentication is on', p('Two-factor authentication was turned on for your account. You will need a code from your authenticator app when you log in.')) }),

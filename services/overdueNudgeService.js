@@ -50,4 +50,4 @@ async function runOverdueNudges(now = new Date()) {
   }
   return { people, tasks: tasksNudged };
 }
-module.exports = { runOverdueNudges, inQuietHours, messageFor };
+module.exports = { runOverdueNudges, inQuietHours, messageFor, scopeFor };
