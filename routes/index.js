@@ -35,7 +35,8 @@ const adminOnly = authorize(SUPER_ADMIN);
 // ---- Public ----
 router.get('/health', (req, res) => res.json({ ok: true, version: 'update-5-pricing-bands' })); // open /api/health to see which server version is live
 router.get('/plans', billing.plans);
-router.post('/auth/register', authLimiter, validate(v.register), auth.register);
+// router.post('/auth/register', authLimiter, validate(v.register), auth.register);
+router.post('/auth/register', validate(v.register), auth.register);
 // Paystack calls this itself (public on purpose; protected by its signature, checked inside)
 router.post('/webhooks/paystack', onlinePay.webhook);
 router.get('/company', companyCtl.get); // public: business + support contact details
