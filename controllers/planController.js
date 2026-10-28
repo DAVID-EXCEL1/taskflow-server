@@ -10,6 +10,7 @@ const planCache = require('../services/planCache');
 const Subscription = require('../models/Subscription');
 const pricing = require('../services/pricingService');
 const Category = require('../models/Category');
+const Team = require('../models/Team');
 const { buildScope } = require('../services/taskService');
 const { getAccess } = require('../services/subscriptionService');
 const { ROLES } = require('../config/constants');
@@ -93,10 +94,23 @@ exports.draftTasks = asyncHandler(async (req, res) => {
 
   let drafts;
   try {
-    const cats = await Category.find(s.isIndividual ? { user: req.user._id } : { organization: req.user.organization }).select('name').limit(30).lean();
+    const orgId = req.user.organization;
+    const [cats, orgMembers, orgTeams] = await Promise.all([
+      Category.find(s.isIndividual ? { user: req.user._id } : { organization: orgId }).select('name').limit(30).lean(),
+      s.isIndividual ? [] : User.find({ organization: orgId, isActive: true }).select('_id name teams').limit(200).lean(),
+      s.isIndividual ? [] : Team.find({ organization: orgId }).select('_id name').limit(100).lean(),
+    ]);
     const names = cats.map((c) => c.name);
-    const text = await ai.chat({ messages: draft.buildMessages(req.body.prompt, names, { tz: req.user.timezone || DEFAULT_TZ }), maxTokens: 1000, temperature: 0.3, timeoutMs: 20000 });
-    drafts = draft.parseDrafts(text, names);
+    const myTeams = (req.user.teams || []).map(String);
+    const members = orgMembers
+      .filter((m) => req.user.role !== ROLES.ORGANIZATION_MEMBER || String(m._id) === String(req.user._id) || m.teams.some((id) => myTeams.includes(String(id))))
+      .map((m) => ({ id: String(m._id), name: m.name }));
+    const teams = orgTeams
+      .filter((t) => req.user.role !== ROLES.ORGANIZATION_MEMBER || myTeams.includes(String(t._id)))
+      .map((t) => ({ id: String(t._id), name: t.name }));
+    const context = { tz: req.user.timezone || DEFAULT_TZ, members, teams };
+    const text = await ai.chat({ messages: draft.buildMessages(req.body.prompt, names, context), maxTokens: 1000, temperature: 0.3, timeoutMs: 20000 });
+    drafts = draft.parseDrafts(text, names, context);
     if (!drafts.length) throw new AppError('I could not turn that into tasks. Try saying what you need to do and when, for example: "Pay rent on 1 November and call the landlord on Friday".', 422, { code: 'AI_NO_TASKS' });
   } catch (e) {
     await quota.refund(req.user._id, s.org?.id); // a failed attempt never costs the user a use
