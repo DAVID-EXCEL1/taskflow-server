@@ -36,7 +36,7 @@ async function registrationOptions(user, req) {
   const options = await webauthn.generateRegistrationOptions({
     rpName: RP_NAME(), rpID, userName: user.email, userDisplayName: user.name, userID: new TextEncoder().encode(String(user._id)), attestationType: 'none',
     excludeCredentials: existing.map((p) => ({ id: p.credentialId, transports: p.transports })),
-    authenticatorSelection: { residentKey: 'preferred', userVerification: 'required' }, timeout: 120_000,
+    authenticatorSelection: { residentKey: 'required', userVerification: 'required' }, timeout: 120_000,
   });
   return { options, challengeId: await newChallenge('register', options.challenge, origin, user._id) };
 }

@@ -14,7 +14,7 @@ const login = async (device, opts) => { const { options, challengeId } = await s
 
 test('registering a fingerprint: asks for user verification, stores only the PUBLIC key, never shows it back', async () => {
   fresh(); const u = person(); const { options } = await svc.registrationOptions(u, SITE);
-  assert.equal(options.rp.id, 'setyourtask.com'); assert.equal(options.authenticatorSelection.userVerification, 'required'); assert.equal(options.attestation, 'none');
+  assert.equal(options.rp.id, 'setyourtask.com'); assert.equal(options.authenticatorSelection.userVerification, 'required'); assert.equal(options.authenticatorSelection.residentKey, 'required'); assert.equal(options.attestation, 'none');
   const d = await enroll(u); const row = keys.rows[0]; assert.equal(row.credentialId, d.id); assert.equal(row.name, 'My phone'); assert.equal(row.rpID, 'setyourtask.com'); assert.ok(row.publicKey.length > 40);
   assert.ok(!JSON.stringify(row).includes(d.privateKey.export({ type: 'pkcs8', format: 'pem' }).slice(30, 60)), 'no private key anywhere');
   const l = await svc.list(u._id); assert.equal(l.length, 1); assert.equal(l[0].publicKey, undefined);
