@@ -6,7 +6,13 @@ process.env.PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY || 'sk_test_AB
 process.env.CLIENT_URL = 'https://taxkflow.com,https://example.vercel.app';
 
 // A Mongoose-like query: works with .select().lean(), .sort(), .limit() AND with a plain `await`.
-const query = (val) => { const q = { select: () => q, limit: () => q, skip: () => q, sort: () => q, populate: () => q, lean: async () => val, then: (res, rej) => Promise.resolve(val).then(res, rej) }; return q; };
+// Like Mongoose: .select('a b') keeps only those fields (and _id); .select('-a') drops fields; '+a' (e.g. +password) changes nothing here.
+const project = (val, fields) => {
+  const toks = String(fields).split(/\s+/).filter(Boolean); const inc = toks.filter((t) => !t.startsWith('-') && !t.startsWith('+')); const exc = toks.filter((t) => t.startsWith('-')).map((t) => t.slice(1));
+  const cut = (r) => { if (!r || typeof r !== 'object' || Array.isArray(r)) return r; if (inc.length) { const o = { _id: r._id }; for (const k of inc) if (k in r) o[k] = r[k]; return o; } if (exc.length) { const o = { ...r }; for (const k of exc) delete o[k]; return o; } return r; };
+  return Array.isArray(val) ? val.map(cut) : cut(val);
+};
+const query = (val) => { let cur = val; const q = { select: (f) => { cur = project(cur, f); return q; }, limit: () => q, skip: () => q, sort: () => q, populate: () => q, lean: async () => cur, then: (res, rej) => Promise.resolve(cur).then(res, rej) }; return q; };
 const get = (o, p) => p.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o);
 const set = (o, p, v) => { const ks = p.split('.'); let t = o; ks.slice(0, -1).forEach((k) => { t[k] = t[k] || {}; t = t[k]; }); t[ks.at(-1)] = v; };
 function matches(doc, f) {
@@ -41,7 +47,7 @@ function fakeModel(Model) {
   const rows = [];
   const withSave = (d) => Object.assign(d, { save: async () => d });
   Object.assign(Model, {
-    create: async (d) => { const r = withSave({ _id: `id${++seq}`, createdAt: new Date(), ...d }); rows.push(r); return r; },
+    create: async (d) => { const r = withSave({ _id: String(++seq).padStart(24, '0'), createdAt: new Date(), ...d }); rows.push(r); return r; },
     find: (f = {}) => query(rows.filter((r) => matches(r, f))),
     findOne: (f = {}) => query(rows.find((r) => matches(r, f)) || null),
     findById: (id) => query(rows.find((r) => String(r._id) === String(id)) || null),
@@ -50,6 +56,8 @@ function fakeModel(Model) {
     updateOne: async (f, u) => { const r = rows.find((x) => matches(x, f)); if (r) applyUpdate(r, u); return { matchedCount: r ? 1 : 0, modifiedCount: r ? 1 : 0 }; },
     updateMany: async (f, u) => { const hit = rows.filter((x) => matches(x, f)); hit.forEach((r) => applyUpdate(r, u)); return { modifiedCount: hit.length }; },
     findOneAndUpdate: (f, u) => { const r = rows.find((x) => matches(x, f)); if (r) applyUpdate(r, u); return query(r || null); },
+    findOneAndDelete: (f) => { const i = rows.findIndex((x) => matches(x, f)); const r = i >= 0 ? rows.splice(i, 1)[0] : null; return query(r); },
+    deleteOne: async (f) => { const i = rows.findIndex((x) => matches(x, f)); if (i >= 0) rows.splice(i, 1); return { deletedCount: i >= 0 ? 1 : 0 }; },
     deleteMany: async (f) => { let n = 0; for (let i = rows.length - 1; i >= 0; i--) if (matches(rows[i], f)) { rows.splice(i, 1); n++; } return { deletedCount: n }; },
   });
   return { rows, clear: () => { rows.length = 0; } };

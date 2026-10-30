@@ -17,8 +17,11 @@ const email = require('../services/emailService');
 const evs = require('../services/emailVerificationService');
 const googleAuth = require('../services/googleAuth');
 const { EMAIL_DEFAULTS } = require('../services/notificationService');
+const sms = require('../services/smsService');
+const whatsapp = require('../services/whatsappService');
+const WhatsAppLink = require('../models/WhatsAppLink');
 
-const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, twoFactorEnabled: !!u.twoFactor?.enabled, deletionScheduledFor: u.deletion?.scheduledFor || null, timezone: u.timezone || 'Africa/Lagos', emailVerified: !!u.emailVerified || u.role === ROLES.SUPER_ADMIN, emailPrefs: { ...EMAIL_DEFAULTS, ...Object.fromEntries(Object.entries(u.emailPrefs || {}).filter(([k, v]) => k !== 'lastDigestDay' && typeof v === 'boolean')) }, hasGoogle: !!u.googleId, overdueNudge: { everyMinutes: u.overdueNudge?.everyMinutes || 0, quietFrom: u.overdueNudge?.quietFrom ?? 22, quietTo: u.overdueNudge?.quietTo ?? 7 }, role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
+const publicUser = (u) => ({ id: u._id, name: u.name, email: u.email, phone: u.phone, smsPhone: u.smsPhone || null, smsVerified: !!u.smsVerifiedAt, twoFactorEnabled: !!u.twoFactor?.enabled, deletionScheduledFor: u.deletion?.scheduledFor || null, timezone: u.timezone || 'Africa/Lagos', emailVerified: !!u.emailVerified || u.role === ROLES.SUPER_ADMIN, emailPrefs: { ...EMAIL_DEFAULTS, ...Object.fromEntries(Object.entries(u.emailPrefs || {}).filter(([k, v]) => k !== 'lastDigestDay' && typeof v === 'boolean')) }, morningPlan: { enabled: !!u.morningPlan?.enabled, time: u.morningPlan?.time || '08:00', email: u.morningPlan?.email !== false, push: u.morningPlan?.push !== false, whatsapp: !!u.morningPlan?.whatsapp, sms: !!u.morningPlan?.sms }, hasGoogle: !!u.googleId, overdueNudge: { everyMinutes: u.overdueNudge?.everyMinutes || 0, quietFrom: u.overdueNudge?.quietFrom ?? 22, quietTo: u.overdueNudge?.quietTo ?? 7 }, role: u.role, organization: u.organization, teams: u.teams, createdAt: u.createdAt });
 
 async function buildSession(userDoc) {
   const user = userDoc.toObject ? userDoc.toObject() : userDoc;
@@ -28,6 +31,7 @@ async function buildSession(userDoc) {
 }
 
 exports.buildSession = buildSession;
+exports.assertCanLogin = (...a) => assertCanLogin(...a);
 // A new Personal account, or a Business account whose first user becomes the Organization Owner.
 async function createAccount({ accountType, name, email, password, organization, extra = {} }) {
   if (accountType === 'PERSONAL') {
@@ -101,6 +105,68 @@ exports.updateOverdueNudge = asyncHandler(async (req, res) => {
   user.overdueNudge = { everyMinutes: req.body.everyMinutes, quietFrom: req.body.quietFrom, quietTo: req.body.quietTo };
   await user.save();
   res.json({ success: true, data: publicUser(user), message: req.body.everyMinutes ? 'Overdue reminders saved.' : 'Overdue reminders are off.' });
+});
+
+exports.updateMorningPlan = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
+  if (req.body.sms && (!user.smsVerifiedAt || !user.smsPhone)) throw new AppError('Verify a phone number before enabling SMS morning plans.', 400);
+  if (req.body.sms && !sms.configured()) throw new AppError('SMS delivery is not configured on the server.', 503);
+  if (req.body.whatsapp && !whatsapp.configured()) throw new AppError('WhatsApp delivery is not configured on the server.', 503);
+  if (req.body.whatsapp && !(await WhatsAppLink.exists({ user: user._id, phone: { $type: 'string', $ne: '' } }))) throw new AppError('Connect WhatsApp before enabling WhatsApp morning plans.', 400);
+  user.morningPlan = {
+    ...(user.morningPlan?.toObject ? user.morningPlan.toObject() : user.morningPlan || {}),
+    enabled: req.body.enabled,
+    time: req.body.time,
+    email: req.body.email,
+    push: req.body.push,
+    whatsapp: req.body.whatsapp,
+    sms: req.body.sms,
+  };
+  await user.save();
+  res.json({ success: true, data: publicUser(user), message: req.body.enabled ? 'Morning plan preferences saved.' : 'Morning plan delivery is off.' });
+});
+
+const phoneCodeHash = (userId, code) => crypto.createHash('sha256').update(`${userId}:${code}:${process.env.JWT_SECRET}`).digest('hex');
+exports.phoneStatus = asyncHandler(async (req, res) => {
+  const pending = req.user.smsVerification?.expiresAt > new Date() && req.user.smsVerification?.attempts < 5;
+  res.json({ success: true, data: { configured: sms.configured(), verified: !!req.user.smsVerifiedAt, phone: req.user.smsPhone || null, pendingPhone: pending ? req.user.smsVerification.phone : null } });
+});
+exports.sendPhoneCode = asyncHandler(async (req, res) => {
+  if (!sms.configured()) throw new AppError('SMS verification is not configured on the server.', 503);
+  if (req.user.smsVerifiedAt && req.user.smsPhone === req.body.phone) return res.json({ success: true, message: 'This phone number is already verified.' });
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 60_000);
+  const code = String(crypto.randomInt(100000, 1000000));
+  const reserved = await User.findOneAndUpdate(
+    { _id: req.user._id, $or: [{ 'smsVerification.sentAt': { $exists: false } }, { 'smsVerification.sentAt': { $lte: cutoff } }] },
+    { $set: { smsVerification: { codeHash: phoneCodeHash(req.user._id, code), expiresAt: new Date(now.getTime() + 10 * 60_000), sentAt: now, attempts: 0, phone: req.body.phone } } },
+    { new: true }
+  );
+  if (!reserved) throw new AppError('Wait one minute before requesting another verification code.', 429);
+  try {
+    await sms.sendSms({ to: req.body.phone, message: `Your SetYourTask verification code is ${code}. It expires in 10 minutes.` });
+  } catch (error) {
+    await User.updateOne({ _id: req.user._id, 'smsVerification.codeHash': phoneCodeHash(req.user._id, code) }, { $unset: { 'smsVerification.codeHash': 1, 'smsVerification.expiresAt': 1 } });
+    throw new AppError(error.message, 503);
+  }
+  res.json({ success: true, message: `A verification code was sent to ${req.body.phone}.` });
+});
+exports.verifyPhoneCode = asyncHandler(async (req, res) => {
+  const user = await User.findById(req.user._id);
+  const verification = user.smsVerification;
+  if (!verification?.codeHash || !verification.expiresAt || verification.expiresAt <= new Date() || verification.attempts >= 5) throw new AppError('That verification code expired. Request a new one.', 400);
+  const expected = Buffer.from(verification.codeHash);
+  const actual = Buffer.from(phoneCodeHash(user._id, req.body.code));
+  if (expected.length !== actual.length || !crypto.timingSafeEqual(expected, actual)) {
+    await User.updateOne({ _id: user._id, 'smsVerification.attempts': { $lt: 5 } }, { $inc: { 'smsVerification.attempts': 1 } });
+    throw new AppError('That verification code is incorrect.', 400);
+  }
+  const result = await User.updateOne(
+    { _id: user._id, 'smsVerification.codeHash': verification.codeHash, 'smsVerification.expiresAt': { $gt: new Date() }, 'smsVerification.attempts': { $lt: 5 } },
+    { $set: { smsPhone: verification.phone, smsVerifiedAt: new Date() }, $unset: { smsVerification: 1 } }
+  );
+  if (!result.modifiedCount) throw new AppError('That verification code expired. Request a new one.', 400);
+  res.json({ success: true, data: publicUser(await User.findById(user._id)), message: 'Phone number verified.' });
 });
 
 exports.updateProfile = asyncHandler(async (req, res) => {

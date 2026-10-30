@@ -21,12 +21,16 @@ const security = require('../controllers/securityController');
 const account = require('../controllers/accountController');
 const onlinePay = require('../controllers/onlinePaymentController');
 const companyCtl = require('../controllers/companyController');
+const passkeyCtl = require('../controllers/passkeyController');
 const aiCtl = require('../controllers/aiController');
 const planCtl = require('../controllers/planController');
+const captureCtl = require('../controllers/captureController');
+const calendarCtl = require('../controllers/googleCalendarController');
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many attempts. Try again in a few minutes.' } });
 const forgotLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many requests. Try again in a few minutes.' } });
 const aiUserLimiter = rateLimit({ windowMs: 60 * 1000, max: 6, standardHeaders: true, legacyHeaders: false, keyGenerator: (req) => String(req.user?._id || 'anon'), message: { success: false, message: 'Slow down a little and try again in a minute.' } });
+const captureLimiter = rateLimit({ windowMs: 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { success: false, message: 'Too many captures. Try again in a minute.' } });
 const { SUPER_ADMIN, ORGANIZATION_OWNER, ORGANIZATION_MEMBER, INDIVIDUAL } = ROLES;
 const orgUsers = authorize(ORGANIZATION_OWNER, ORGANIZATION_MEMBER);
 const ownerOnly = authorize(ORGANIZATION_OWNER);
@@ -39,9 +43,16 @@ router.get('/plans', billing.plans);
 router.post('/auth/register', validate(v.register), auth.register);
 // Paystack calls this itself (public on purpose; protected by its signature, checked inside)
 router.post('/webhooks/paystack', onlinePay.webhook);
+router.get('/webhooks/whatsapp', captureCtl.whatsappVerify);
+router.post('/webhooks/whatsapp', captureCtl.whatsappWebhook);
+router.post('/webhooks/mailgun', captureCtl.mailgun);
+router.post('/assistant/capture', captureLimiter, validate(v.assistantCapture), captureCtl.assistantCapture);
+router.get('/calendar/google/callback', calendarCtl.callback);
 router.get('/company', companyCtl.get); // public: business + support contact details
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);
 router.post('/auth/google', authLimiter, validate(v.googleLogin), auth.googleLogin);
+router.post('/auth/passkey/login/options', authLimiter, passkeyCtl.loginOptions);
+router.post('/auth/passkey/login/verify', authLimiter, validate(v.passkeyLogin), passkeyCtl.loginVerify);
 router.post('/auth/google/complete', authLimiter, validate(v.googleComplete), auth.googleComplete);
 router.post('/auth/verify-email', authLimiter, validate(v.verifyEmailToken), auth.verifyEmail);
 router.post('/auth/login/2fa', authLimiter, validate(v.login2fa), security.login2fa);
@@ -57,7 +68,29 @@ router.use(deletionGate); // an account in its 30-day deletion period can only v
 router.get('/auth/me', auth.me);
 router.put('/auth/overdue-reminders', validate(v.overdueNudge), auth.updateOverdueNudge); // allowed while read-only
 router.post('/auth/verify-email/send', authLimiter, auth.sendVerifyEmail);
+router.get('/auth/passkeys', passkeyCtl.list);
+router.post('/auth/passkey/register/options', authLimiter, passkeyCtl.registerOptions);
+router.post('/auth/passkey/register/verify', authLimiter, validate(v.passkeyRegister), passkeyCtl.registerVerify);
+router.delete('/auth/passkeys/:id', authLimiter, passkeyCtl.remove);
 router.put('/auth/email-preferences', validate(v.emailPrefs), auth.updateEmailPrefs);
+router.put('/auth/morning-plan', validate(v.morningPlan), auth.updateMorningPlan);
+router.get('/auth/phone', auth.phoneStatus);
+router.post('/auth/phone/send-code', authLimiter, validate(v.phoneVerificationSend), auth.sendPhoneCode);
+router.post('/auth/phone/verify-code', authLimiter, validate(v.phoneVerificationCode), auth.verifyPhoneCode);
+router.get('/captures', captureCtl.list);
+router.post('/captures', validate(v.manualCapture), captureCtl.createManual);
+router.delete('/captures/:id', captureCtl.remove);
+router.post('/captures/email-address', authLimiter, captureCtl.emailAddress);
+router.get('/captures/whatsapp', captureCtl.whatsappStatus);
+router.post('/captures/whatsapp/pair', authLimiter, captureCtl.whatsappPair);
+router.delete('/captures/whatsapp', captureCtl.whatsappUnlink);
+router.get('/captures/assistant-token', captureCtl.assistantTokenStatus);
+router.post('/captures/assistant-token', authLimiter, captureCtl.createAssistantToken);
+router.delete('/captures/assistant-token', captureCtl.revokeAssistantToken);
+router.get('/calendar/status', calendarCtl.status);
+router.get('/calendar/google/connect', calendarCtl.start);
+router.delete('/calendar/google', calendarCtl.disconnect);
+router.post('/calendar/events', validate(v.calendarEvent), calendarCtl.createEvent);
 router.put('/auth/profile', validate(v.profile), auth.updateProfile);          // allowed while read-only
 router.put('/auth/password', authLimiter, validate(v.changePassword), auth.changePassword);
 router.post('/auth/2fa/setup', authLimiter, security.setup2fa);

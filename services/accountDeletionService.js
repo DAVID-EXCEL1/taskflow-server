@@ -17,17 +17,40 @@ const PushSubscription = require('../models/PushSubscription');
 const PasswordReset = require('../models/PasswordReset');
 const Invitation = require('../models/Invitation');
 const AiUsage = require('../models/AiUsage');
+const Passkey = require('../models/Passkey');
+const TaskCapture = require('../models/TaskCapture');
+const AssistantToken = require('../models/AssistantToken');
+const WhatsAppLink = require('../models/WhatsAppLink');
+const GoogleCalendarConnection = require('../models/GoogleCalendarConnection');
+const CalendarOAuthState = require('../models/CalendarOAuthState');
 const DeletedAccount = require('../models/DeletedAccount');
 const AppError = require('../utils/AppError');
 const { ROLES } = require('../config/constants');
 const { notify } = require('./notificationService');
 const email = require('./emailService');
 const activity = require('./activityService');
+const googleCalendar = require('./googleCalendarService');
 
 const GRACE_DAYS = 30;
 const DAY = 86400000;
 const fmt = (d) => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 const mail = (to, tpl) => email.send({ to, ...tpl }).catch(() => {});
+
+async function purgeIntegrations(userIds) {
+  if (!userIds.length) return;
+  const connections = await GoogleCalendarConnection.find({ user: { $in: userIds } }).select('+refreshTokenEnc');
+  for (const connection of connections) {
+    try { await googleCalendar.revoke(connection); }
+    catch (error) { console.error('Google Calendar token revocation failed during account purge:', error.message); }
+  }
+  await Promise.all([
+    TaskCapture.deleteMany({ user: { $in: userIds } }),
+    AssistantToken.deleteMany({ user: { $in: userIds } }),
+    WhatsAppLink.deleteMany({ user: { $in: userIds } }),
+    GoogleCalendarConnection.deleteMany({ user: { $in: userIds } }),
+    CalendarOAuthState.deleteMany({ user: { $in: userIds } }),
+  ]);
+}
 
 async function requestDeletion(user, reason) {
   const now = new Date();
@@ -103,7 +126,8 @@ async function purgeUser(userId, purgedBy = 'system') {
     await Invitation.deleteMany({ organization: org._id });
     const inactive = members.filter((m) => !m.isActive).map((m) => m._id);
     if (inactive.length) { // members the owner had deactivated are removed with the organization
-      await Notification.deleteMany({ user: { $in: inactive } }); await PushSubscription.deleteMany({ user: { $in: inactive } }); await User.deleteMany({ _id: { $in: inactive } });
+      await purgeIntegrations(inactive);
+      await Notification.deleteMany({ user: { $in: inactive } }); await PushSubscription.deleteMany({ user: { $in: inactive } }); await Passkey.deleteMany({ user: { $in: inactive } }); await User.deleteMany({ _id: { $in: inactive } });
     }
     // active members keep their login and become ordinary personal accounts
     await User.updateMany({ organization: org._id, _id: { $ne: user._id } }, { $set: { role: ROLES.INDIVIDUAL, teams: [] }, $unset: { organization: 1 } });
@@ -112,8 +136,10 @@ async function purgeUser(userId, purgedBy = 'system') {
     await Task.deleteMany({ owner: user._id, organization: null });
     await Category.deleteMany({ user: user._id });
   }
+  await purgeIntegrations([user._id]);
   await Notification.deleteMany({ user: user._id });
   await PushSubscription.deleteMany({ user: user._id });
+  await Passkey.deleteMany({ user: user._id });
   await PasswordReset.deleteMany({ user: user._id });
   await AiUsage.deleteMany({ key: `u:${user._id}` });
   await User.deleteOne({ _id: user._id }); // last: the email address becomes free again

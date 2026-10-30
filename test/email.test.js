@@ -65,6 +65,19 @@ test('reminder emails: assignments are off by default, other kinds never email, 
   sentMails = []; assert.equal(await notif.deliverEmails([a._id], { type: 'TASK_COMPLETED', title: 'x', message: 'y' }), 0); assert.equal(sentMails.length, 0);
   assert.equal(await notif.deliverEmails([a._id], { type: 'SUBSCRIPTION_EXPIRING', title: 'Subscription ends soon', message: 'in 3 days', link: '/subscription' }), 1);
 });
+test('morning plan email requires opt-in, a selected email channel, and a confirmed address', async () => {
+  fresh();
+  const enabled = person({ morningPlan: { enabled: true, email: true, push: false } });
+  const pushOnly = person({ morningPlan: { enabled: true, email: false, push: true } });
+  const disabled = person({ morningPlan: { enabled: false, email: true, push: true } });
+  const unconfirmed = person({ emailVerified: false, morningPlan: { enabled: true, email: true, push: false } });
+  const sent = await notif.deliverEmails([enabled._id, pushOnly._id, disabled._id, unconfirmed._id], {
+    type: 'MORNING_PLAN', title: 'Your plan for today', message: 'Due today (1)\n• Review budget', link: '/dashboard',
+  });
+  assert.equal(sent, 1);
+  assert.deepEqual(sentMails[0].to, [enabled.email]);
+  assert.match(sentMails[0].text, /Review budget/);
+});
 test('reminder emails: stop quietly when the limit is reached, and never break the caller', async () => {
   fresh(); process.env.EMAIL_DAILY_LIMIT = '10'; const ids = Array.from({ length: 12 }, () => person()._id);
   const n = await notif.deliverEmails(ids, { type: 'TASK_REMINDER', title: 't', message: 'm', link: '/' }); assert.equal(n, 7, 'reminders stop at 70% so confirmations still work');

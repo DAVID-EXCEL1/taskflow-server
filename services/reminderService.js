@@ -11,6 +11,7 @@ const { runCleanup } = require('./cleanupService');
 const { reconcile: reconcileOnlinePayments } = require('./onlinePaymentService');
 const { runOverdueNudges } = require('./overdueNudgeService');
 const { runOverdueDigests } = require('./overdueDigestService');
+const { runMorningPlans } = require('./morningPlanService');
 
 const subjectOf = (d) => (d.user ? { user: d.user } : { organization: d.organization });
 
@@ -59,12 +60,13 @@ async function runScheduledJobs() {
     const taskReminders = await runTaskReminders();
     const accountsDeleted = await runAccountPurges();
     const overdueDigests = await runOverdueDigests().catch((e) => { console.error('Overdue summary emails failed:', e.message); return null; });
+    const morningPlans = await runMorningPlans().catch((e) => { console.error('Morning plans failed:', e.message); return null; });
     const overdueNudges = await runOverdueNudges().catch((e) => { console.error('Overdue reminders failed:', e.message); return null; });
     // Safety net for Paystack: activate payments whose confirmation was missed, and clear abandoned checkouts.
     const onlinePayments = await reconcileOnlinePayments().catch((e) => { console.error('Online payment check failed:', e.message); return null; });
     // Housekeeping must never break the reminders above, so a failure here is only logged.
     const cleanup = await runCleanup().catch((e) => { console.error('Cleanup failed:', e.message); return null; });
-    return { subscriptionNotices, taskReminders, accountsDeleted, ...(overdueNudges ? { overdueNudges } : {}), ...(overdueDigests ? { overdueDigests } : {}), ...(onlinePayments ? { onlinePayments } : {}), ...(cleanup ? { cleanup } : {}) };
+    return { subscriptionNotices, taskReminders, accountsDeleted, ...(overdueNudges ? { overdueNudges } : {}), ...(overdueDigests ? { overdueDigests } : {}), ...(morningPlans ? { morningPlans } : {}), ...(onlinePayments ? { onlinePayments } : {}), ...(cleanup ? { cleanup } : {}) };
   } finally { running = false; }
 }
 
@@ -72,7 +74,7 @@ function startReminderJob() {
   if (process.env.ENABLE_CRON === 'false') return;
   const run = () => runScheduledJobs().catch((e) => console.error('Scheduled jobs failed:', e.message));
   run();
-  cron.schedule('*/5 * * * *', run);
-  console.log('Reminder job scheduled (every 5 minutes). An external scheduler may also call /api/cron/run.');
+  cron.schedule('* * * * *', run);
+  console.log('Reminder job scheduled (every minute). An external scheduler may also call /api/cron/run.');
 }
 module.exports = { runSubscriptionChecks, runScheduledJobs, startReminderJob };

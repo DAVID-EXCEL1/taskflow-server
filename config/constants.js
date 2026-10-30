@@ -38,7 +38,7 @@ const DEFAULT_CATEGORIES = [
 ];
 const REMINDER_DAYS = [7, 3, 1];
 // Bump when the Terms/Privacy change materially (keep in sync with client/src/config/legal.js).
-const TERMS_VERSION = '2026-10-03';
+const TERMS_VERSION = '2026-10-29';
 // Renewal opens this many days before expiry (set to 0 to allow renewal only after expiry).
 const RENEWAL_WINDOW_DAYS = 7;
 

@@ -21,7 +21,7 @@ const register = z.object({
   email, password,
   inviteToken: z.string().optional(),
   organization: z.object(orgFields).optional(),
-  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
+  acceptTerms: z.literal(true, { error: 'You must accept the Terms and Privacy Policy' }),
 }).refine((d) => d.inviteToken || d.accountType !== 'BUSINESS' || d.organization, { message: 'Organization details are required', path: ['organization'] });
 
 const login = z.object({ email, password: z.string().min(1, 'Password is required') });
@@ -50,7 +50,7 @@ const invite = z.object({ email, team: optId });
 const memberTeams = z.object({ teamIds: z.array(objectId) });
 const payment = z.object({
   amount: z.coerce.number().positive('Enter the amount you paid'),
-  paymentDate: z.coerce.date({ invalid_type_error: 'Enter the payment date' }),
+  paymentDate: z.coerce.date({ error: 'Enter the payment date' }),
   reference: optStr(120), description: optStr(500),
 });
 const reject = z.object({ reason: optStr(300) });
@@ -65,7 +65,7 @@ const aiSwitch = z.object({ enabled: z.boolean() });
 const aiDraft = z.object({ prompt: z.string().trim().min(3, 'Describe what you need to do').max(600, 'Please keep it under 600 characters') });
 const aiOptIn = z.object({ enabled: z.boolean() });
 const deleteRequest = z.object({ password: z.string().min(1, 'Enter your password'), code: z.string().trim().max(20).optional(), confirm: z.string().trim().min(1, 'Type the confirmation text').max(200), reason: optStr(300) });
-const purgeNow = z.object({ confirm: z.literal('DELETE', { errorMap: () => ({ message: 'Type DELETE to confirm' }) }) });
+const purgeNow = z.object({ confirm: z.literal('DELETE', { error: 'Type DELETE to confirm' }) });
 const memberDeactivate = z.object({ reason: optStr(300) });
 const pricesMap = z.record(z.string(), z.number().nullable().optional()); // strict checking (limits, decimals, consistency) happens in pricingService
 const plansPrices = z.object({ individual: pricesMap, bands: z.array(z.object({ maxMembers: z.number(), prices: pricesMap, aiPerUser: z.number().optional(), aiOrgDaily: z.number().optional() })).min(1).max(12) });
@@ -76,11 +76,35 @@ const verifyOnline = z.object({ reference: z.string().trim().min(5).max(80) });
 const companyBody = z.object({ name: z.string(), email: z.string().optional(), phone: z.string().optional(), whatsapp: z.string().optional(), address: z.string().optional(), website: z.string().optional(), supportHours: z.string().optional(), vatRate: z.number().optional(), taxId: z.string().optional() });
 const verifyEmailToken = z.object({ token: z.string().min(20).max(200) });
 const emailPrefs = z.object({ enabled: z.boolean().optional(), reminders: z.boolean().optional(), subscription: z.boolean().optional(), overdueDigest: z.boolean().optional(), assignments: z.boolean().optional() }).strict().refine((d) => Object.keys(d).length > 0, 'Nothing to change');
+const morningPlan = z.object({
+  enabled: z.boolean(),
+  time: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, 'Choose a valid time'),
+  email: z.boolean(),
+  push: z.boolean(),
+  whatsapp: z.boolean(),
+  sms: z.boolean(),
+}).strict().refine((d) => !d.enabled || d.email || d.push || d.whatsapp || d.sms, 'Choose at least one delivery method.');
+const phoneVerificationSend = z.object({ phone: z.string().regex(/^\+[1-9]\d{7,14}$/, 'Use an international phone number, for example +2348012345678') }).strict();
+const phoneVerificationCode = z.object({ code: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code') }).strict();
+const assistantCapture = z.object({
+  title: z.string().trim().min(1).max(200).optional(),
+  content: z.string().trim().min(1).max(10000),
+}).strict();
+const manualCapture = assistantCapture.extend({ source: z.enum(['voice', 'manual']).optional() }).strict();
+const calendarEvent = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).optional(),
+  start: z.string().datetime({ offset: true }),
+  end: z.string().datetime({ offset: true }),
+}).strict().refine((d) => new Date(d.end) > new Date(d.start), { message: 'Event end must be after its start.', path: ['end'] });
 const googleLogin = z.object({ credential: z.string().min(20).max(4000) });
 const googleComplete = z.object({
   signupToken: z.string().min(20).max(4000), accountType: z.enum(['PERSONAL', 'BUSINESS']), organization: z.object(orgFields).optional(),
-  acceptTerms: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms and Privacy Policy' }) }),
+  acceptTerms: z.literal(true, { error: 'You must accept the Terms and Privacy Policy' }),
 }).refine((d) => d.accountType !== 'BUSINESS' || !!d.organization, { message: 'Organization details are required for a Business account', path: ['organization'] });
+const passkeyResponse = z.object({ id: z.string().min(10).max(1400), rawId: z.string().max(1400), type: z.literal('public-key'), response: z.object({}).passthrough() }).passthrough();
+const passkeyLogin = z.object({ challengeId: z.string().regex(/^[a-f0-9]{24}$/, 'Invalid request'), response: passkeyResponse });
+const passkeyRegister = z.object({ challengeId: z.string().regex(/^[a-f0-9]{24}$/, 'Invalid request'), response: passkeyResponse, name: z.string().trim().max(40).optional() });
 const forgotPassword = z.object({ email });
 const resetPassword = z.object({ token: z.string().min(32).max(200), password });
 const login2fa = z.object({ challengeToken: z.string().min(10).max(2000), code: z.string().trim().min(6).max(20) });
@@ -94,4 +118,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, verifyEmailToken, emailPrefs, googleLogin, googleComplete, overdueNudge, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, passkeyLogin, passkeyRegister, verifyEmailToken, emailPrefs, morningPlan, phoneVerificationSend, phoneVerificationCode, assistantCapture, manualCapture, calendarEvent, googleLogin, googleComplete, overdueNudge, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
