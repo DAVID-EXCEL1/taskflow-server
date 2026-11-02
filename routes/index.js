@@ -85,7 +85,6 @@ router.get('/settings/features', adminOnly, featureCtl.adminList);
 router.put('/settings/features', adminOnly, requireTwoFactor, validate(v.featureToggle), featureCtl.adminSet);
 router.get('/captures', captureCtl.list);
 router.post('/captures', validate(v.manualCapture), captureCtl.createManual);
-router.delete('/captures/:id', captureCtl.remove);
 router.post('/captures/email-address', feature('emailForwarding'), authLimiter, captureCtl.emailAddress);
 router.get('/captures/whatsapp', feature('whatsapp'), captureCtl.whatsappStatus);
 router.post('/captures/whatsapp/pair', feature('whatsapp'), authLimiter, captureCtl.whatsappPair);
@@ -93,6 +92,7 @@ router.delete('/captures/whatsapp', feature('whatsapp'), captureCtl.whatsappUnli
 router.get('/captures/assistant-token', captureCtl.assistantTokenStatus);
 router.post('/captures/assistant-token', authLimiter, captureCtl.createAssistantToken);
 router.delete('/captures/assistant-token', captureCtl.revokeAssistantToken);
+router.delete('/captures/:id', captureCtl.remove);
 router.get('/calendar/status', feature('calendar'), calendarCtl.status);
 router.get('/calendar/google/connect', feature('calendar'), calendarCtl.start);
 router.delete('/calendar/google', feature('calendar'), calendarCtl.disconnect);
