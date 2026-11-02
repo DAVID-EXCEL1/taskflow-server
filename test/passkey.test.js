@@ -14,7 +14,7 @@ const login = async (device, opts) => { const { options, challengeId } = await s
 
 test('registering a fingerprint: asks for user verification, stores only the PUBLIC key, never shows it back', async () => {
   fresh(); const u = person(); const { options } = await svc.registrationOptions(u, SITE);
-  assert.equal(options.rp.id, 'setyourtask.com'); assert.equal(options.authenticatorSelection.userVerification, 'required'); assert.equal(options.authenticatorSelection.residentKey, 'required'); assert.equal(options.attestation, 'none');
+  assert.equal(options.rp.id, 'setyourtask.com'); assert.equal(options.authenticatorSelection.userVerification, 'required'); assert.equal(options.attestation, 'none');
   const d = await enroll(u); const row = keys.rows[0]; assert.equal(row.credentialId, d.id); assert.equal(row.name, 'My phone'); assert.equal(row.rpID, 'setyourtask.com'); assert.ok(row.publicKey.length > 40);
   assert.ok(!JSON.stringify(row).includes(d.privateKey.export({ type: 'pkcs8', format: 'pem' }).slice(30, 60)), 'no private key anywhere');
   const l = await svc.list(u._id); assert.equal(l.length, 1); assert.equal(l[0].publicKey, undefined);
@@ -81,11 +81,16 @@ test('controller: a fingerprint login returns a normal session and skips the aut
   fresh(); const u = person({ twoFactor: { enabled: true } }); const d = await enroll(u); const { options, challengeId } = (await call(ctl.loginOptions, {})).body;
   const r = await call(ctl.loginVerify, { body: { challengeId, response: d.get(options) } }); assert.ok(r.body.token); assert.equal(r.body.twoFactorRequired, undefined); assert.ok(u.lastLoginAt);
 });
-test('controller: administrators and deactivated accounts cannot use it; admins cannot even register one', async () => {
+test('controller: deactivated accounts cannot use it; administrators CAN (their sensitive actions still need the authenticator code)', async () => {
   fresh(); const u = person(); const d = await enroll(u); u.isActive = false;
   let o = (await call(ctl.loginOptions, {})).body; assert.equal((await call(ctl.loginVerify, { body: { challengeId: o.challengeId, response: d.get(o.options) } })).err?.statusCode, 403);
-  fresh(); const admin = person({ role: 'SUPER_ADMIN' }); assert.equal((await call(ctl.registerOptions, { user: admin })).err?.statusCode, 403);
-  fresh(); const a2 = person(); const d2 = await enroll(a2); a2.role = 'SUPER_ADMIN'; o = (await call(ctl.loginOptions, {})).body; assert.equal((await call(ctl.loginVerify, { body: { challengeId: o.challengeId, response: d2.get(o.options) } })).err?.statusCode, 403);
+  fresh(); const admin = person({ role: 'SUPER_ADMIN' }); const r = await call(ctl.registerOptions, { user: admin }); assert.ok(r.body.challengeId, 'an administrator may add a fingerprint');
+  const d2 = makeDevice(); const reg = await call(ctl.registerVerify, { user: admin, body: { challengeId: r.body.challengeId, response: d2.create(r.body.options), name: 'Admin phone' } }); assert.equal(reg.status, 201);
+  o = (await call(ctl.loginOptions, {})).body; const login = await call(ctl.loginVerify, { body: { challengeId: o.challengeId, response: d2.get(o.options) } }); assert.ok(login.body.token); assert.equal(login.body.user?.role ?? 'SUPER_ADMIN', 'SUPER_ADMIN');
+});
+test('passkeys are always saved on the device (discoverable), and a wrong website gets a message that says what to do', async () => {
+  fresh(); const u = person(); const { options } = await svc.registrationOptions(u, SITE); assert.equal(options.authenticatorSelection.residentKey, 'required');
+  const e = await thrown(svc.registrationOptions(u, { headers: { origin: 'https://www.setyourtask.com' } })); assert.equal(e.statusCode, 400); assert.match(e.message, /www\.setyourtask\.com/); assert.match(e.message, /https:\/\/setyourtask\.com/);
 });
 test('controller: adding a fingerprint raises a security notification and returns the updated list', async () => {
   fresh(); const u = person(); const d = makeDevice(); const o = (await call(ctl.registerOptions, { user: u })).body; assert.ok(o.challengeId);

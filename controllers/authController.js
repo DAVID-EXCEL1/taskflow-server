@@ -15,6 +15,8 @@ const { notify } = require('../services/notificationService');
 const { signChallenge } = require('../middleware/auth');
 const email = require('../services/emailService');
 const evs = require('../services/emailVerificationService');
+const cap = require('../services/dailyCap');
+const features = require('../services/featureService');
 const googleAuth = require('../services/googleAuth');
 const { EMAIL_DEFAULTS } = require('../services/notificationService');
 const sms = require('../services/smsService');
@@ -109,6 +111,9 @@ exports.updateOverdueNudge = asyncHandler(async (req, res) => {
 
 exports.updateMorningPlan = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
+  // Text and WhatsApp delivery only exist once the admin has switched them on.
+  if (!(await features.isOn('sms'))) req.body.sms = false;
+  if (!(await features.isOn('whatsapp'))) req.body.whatsapp = false;
   if (req.body.sms && (!user.smsVerifiedAt || !user.smsPhone)) throw new AppError('Verify a phone number before enabling SMS morning plans.', 400);
   if (req.body.sms && !sms.configured()) throw new AppError('SMS delivery is not configured on the server.', 503);
   if (req.body.whatsapp && !whatsapp.configured()) throw new AppError('WhatsApp delivery is not configured on the server.', 503);
@@ -134,6 +139,10 @@ exports.phoneStatus = asyncHandler(async (req, res) => {
 exports.sendPhoneCode = asyncHandler(async (req, res) => {
   if (!sms.configured()) throw new AppError('SMS verification is not configured on the server.', 503);
   if (req.user.smsVerifiedAt && req.user.smsPhone === req.body.phone) return res.json({ success: true, message: 'This phone number is already verified.' });
+  // Protection against text-message abuse (each text costs money and could be sent to someone who never asked for it).
+  const allowed = String(process.env.SMS_ALLOWED_PREFIXES || '+234').split(',').map((p) => p.trim()).filter(Boolean);
+  if (!allowed.some((p) => req.body.phone.startsWith(p))) throw new AppError(`Text messages are only available for numbers starting with ${allowed.join(' or ')} right now.`, 400);
+  if (req.user.role !== ROLES.SUPER_ADMIN && !req.user.emailVerified) throw new AppError('Please confirm your email address first, then verify your phone number.', 403);
   const now = new Date();
   const cutoff = new Date(now.getTime() - 60_000);
   const code = String(crypto.randomInt(100000, 1000000));
@@ -143,10 +152,15 @@ exports.sendPhoneCode = asyncHandler(async (req, res) => {
     { new: true }
   );
   if (!reserved) throw new AppError('Wait one minute before requesting another verification code.', 429);
+  // Protection against text-message abuse (each text costs money and could be sent to someone who never asked for it).
+  const userKey = `sms:u:${req.user._id}`; const phoneKey = `sms:p:${crypto.createHash('sha256').update(req.body.phone).digest('hex').slice(0, 24)}`;
+  if (!(await cap.take(userKey, cap.intEnv('SMS_CODES_PER_USER_DAILY', 5)))) throw new AppError('You have asked for too many codes today. Please try again tomorrow.', 429);
+  if (!(await cap.take(phoneKey, cap.intEnv('SMS_CODES_PER_PHONE_DAILY', 3)))) { await cap.give(userKey); throw new AppError('Too many codes were sent to this number today. Please try again tomorrow.', 429); }
   try {
     await sms.sendSms({ to: req.body.phone, message: `Your SetYourTask verification code is ${code}. It expires in 10 minutes.` });
   } catch (error) {
     await User.updateOne({ _id: req.user._id, 'smsVerification.codeHash': phoneCodeHash(req.user._id, code) }, { $unset: { 'smsVerification.codeHash': 1, 'smsVerification.expiresAt': 1 } });
+    await cap.give(userKey); await cap.give(phoneKey);
     throw new AppError(error.message, 503);
   }
   res.json({ success: true, message: `A verification code was sent to ${req.body.phone}.` });

@@ -1,3 +1,4 @@
+const cap = require('./dailyCap');
 const crypto = require('crypto');
 const TaskCapture = require('../models/TaskCapture');
 
@@ -21,6 +22,9 @@ async function create({ user, source, sourceId, title, content }) {
     const existing = await TaskCapture.findOne({ sourceId: dedupeId }).lean();
     if (existing) return { capture: existing, duplicate: true };
   }
+  // Limits: how many items can sit in the inbox, and how many can arrive per day (stops spam and runaway forwarding).
+  if ((await TaskCapture.countDocuments({ user })) >= cap.intEnv('CAPTURE_MAX_STORED', 500)) return { capture: null, limited: 'full', message: 'Your task inbox is full. Review or delete some items first.' };
+  if (!(await cap.take(`cap:u:${user}`, cap.intEnv('CAPTURE_DAILY_LIMIT', 100)))) return { capture: null, limited: 'daily', message: 'You have reached today’s limit for new inbox items. Please try again tomorrow.' };
   try {
     const capture = await TaskCapture.create({ user, source, sourceId: dedupeId, title: cleanedTitle, content: cleanedContent });
     return { capture, duplicate: false };

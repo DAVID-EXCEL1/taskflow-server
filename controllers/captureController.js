@@ -10,6 +10,14 @@ const { getAccess } = require('../services/subscriptionService');
 const notifications = require('../services/notificationService');
 const { transcribeWhatsAppAudio } = require('../services/voiceTranscriptionService');
 const whatsapp = require('../services/whatsappService');
+const cap = require('../services/dailyCap');
+
+// Voice notes cost money to transcribe: a daily limit per person and for the whole app.
+const takeVoice = async (userId) => {
+  if (!(await cap.take(`voice:u:${userId}`, cap.intEnv('VOICE_DAILY_LIMIT', 20)))) return false;
+  if (!(await cap.take('voice:g', cap.intEnv('VOICE_DAILY_LIMIT_GLOBAL', 300)))) { await cap.give(`voice:u:${userId}`); return false; }
+  return true;
+};
 
 const same = (a, b) => {
   const left = Buffer.from(String(a || ''));
@@ -30,6 +38,7 @@ exports.createManual = asyncHandler(async (req, res) => {
     title: req.body.title,
     content: req.body.content,
   });
+  if (result.limited) throw new AppError(result.message, 429);
   res.status(201).json({ success: true, data: result.capture });
 });
 
@@ -98,6 +107,7 @@ exports.assistantCapture = asyncHandler(async (req, res) => {
   record.lastUsedAt = new Date();
   await record.save();
   const result = await capture.create({ user: user._id, source: 'shortcut', title: req.body.title, content: req.body.content });
+  if (result.limited) throw new AppError(result.message, 429);
   res.status(201).json({ success: true, data: { id: result.capture._id, status: 'needs_review' } });
 });
 
@@ -117,6 +127,7 @@ exports.mailgun = asyncHandler(async (req, res) => {
   const message = String(req.body['stripped-text'] || req.body['body-plain'] || '').slice(0, 10000);
   const subject = String(req.body.subject || '').slice(0, 200);
   const result = await capture.create({ user: user._id, source: 'email', sourceId: `mailgun:${sourceId}`, title: subject, content: message });
+  if (result.limited) return res.json({ success: true, limited: true }); // answer 200 so the mail provider does not keep retrying
   if (!result.duplicate) await notifications.notify([user._id], { type: 'CAPTURE_RECEIVED', title: 'Email draft received', message: 'A forwarded email is ready to review in your task inbox.', link: '/inbox' });
   res.json({ success: true, duplicate: result.duplicate });
 });
@@ -171,7 +182,9 @@ exports.whatsappWebhook = asyncHandler(async (req, res) => {
     if (!phone || (!body && message.type !== 'audio')) continue;
     const link = await WhatsAppLink.findOne({ phone }).select('user').lean();
     if (!link) continue;
-    if (message.type === 'audio' && message.audio?.id) {
+    if (message.type === 'audio' && message.audio?.id && !(await takeVoice(link.user))) {
+      body = 'Voice note received, but the daily voice-note limit was reached. Please type the task instead.';
+    } else if (message.type === 'audio' && message.audio?.id) {
       try {
         body = await transcribeWhatsAppAudio(message.audio.id) || 'Voice note received. Configure AI_STT_MODEL and the AI provider to transcribe WhatsApp voice notes.';
       } catch (error) {
@@ -181,6 +194,7 @@ exports.whatsappWebhook = asyncHandler(async (req, res) => {
     }
     if (!body || !message.id) continue;
     const result = await capture.create({ user: link.user, source: 'whatsapp', sourceId: `whatsapp:${message.id}`, content: body });
+    if (result.limited) continue;
     if (!result.duplicate) await notifications.notify([link.user], {
       type: 'CAPTURE_RECEIVED',
       title: 'WhatsApp draft received',

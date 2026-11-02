@@ -105,6 +105,7 @@ const googleComplete = z.object({
 const passkeyResponse = z.object({ id: z.string().min(10).max(1400), rawId: z.string().max(1400), type: z.literal('public-key'), response: z.object({}).passthrough() }).passthrough();
 const passkeyLogin = z.object({ challengeId: z.string().regex(/^[a-f0-9]{24}$/, 'Invalid request'), response: passkeyResponse });
 const passkeyRegister = z.object({ challengeId: z.string().regex(/^[a-f0-9]{24}$/, 'Invalid request'), response: passkeyResponse, name: z.string().trim().max(40).optional() });
+const featureToggle = z.object({ key: z.enum(['sms', 'whatsapp', 'emailForwarding', 'calendar']), enabled: z.boolean() });
 const forgotPassword = z.object({ email });
 const resetPassword = z.object({ token: z.string().min(32).max(200), password });
 const login2fa = z.object({ challengeToken: z.string().min(10).max(2000), code: z.string().trim().min(6).max(20) });
@@ -118,4 +119,4 @@ const pushSubscription = z.object({
 });
 const pushEndpoint = z.object({ endpoint: z.string().max(1000) });
 
-module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, passkeyLogin, passkeyRegister, verifyEmailToken, emailPrefs, morningPlan, phoneVerificationSend, phoneVerificationCode, assistantCapture, manualCapture, calendarEvent, googleLogin, googleComplete, overdueNudge, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };
+module.exports = { register, login, profile, changePassword, task, taskUpdate, category, team, org, invite, memberTeams, payment, reject, paymentInfo, status, pushSubscription, pushEndpoint, featureToggle, passkeyLogin, passkeyRegister, verifyEmailToken, emailPrefs, morningPlan, phoneVerificationSend, phoneVerificationCode, assistantCapture, manualCapture, calendarEvent, googleLogin, googleComplete, overdueNudge, companyBody, plansPrices, onlineStart, seatLimit, billingMethods, verifyOnline, deleteRequest, purgeNow, memberDeactivate, aiSwitch, aiOptIn, aiDraft, forgotPassword, resetPassword, login2fa, code2fa, disable2fa };

@@ -2,6 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const TaskCapture = require('../models/TaskCapture');
 const capture = require('../services/captureService');
+const { fakeUsage } = require('./helpers');
+fakeUsage(); // the inbox now counts daily limits
+TaskCapture.countDocuments = async () => 0;
 
 test('capture deduplication is idempotent per user without suppressing another user', async () => {
   const originalFindOne = TaskCapture.findOne;

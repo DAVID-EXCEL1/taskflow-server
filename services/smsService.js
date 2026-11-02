@@ -1,10 +1,16 @@
+const cap = require('./dailyCap');
 const configured = () => !!(process.env.AT_USERNAME && process.env.AT_API_KEY);
 const endpoint = () => process.env.AT_ENV === 'sandbox'
   ? 'https://api.sandbox.africastalking.com/version1/messaging'
   : 'https://api.africastalking.com/version1/messaging';
 
-async function sendSms({ to, message }) {
+// Every text counts against a daily limit for the whole app (SMS_DAILY_LIMIT, default 300), so nothing can run up a bill.
+async function sendSms(args) {
   if (!configured()) throw new Error('Africa’s Talking SMS is not configured.');
+  if (!(await cap.take('sms:g', cap.intEnv('SMS_DAILY_LIMIT', 300)))) throw new Error('The daily text-message limit was reached. Please try again tomorrow.');
+  try { return await deliver(args); } catch (e) { await cap.give('sms:g'); throw e; }
+}
+async function deliver({ to, message }) {
   const form = new URLSearchParams({
     username: process.env.AT_USERNAME,
     to,

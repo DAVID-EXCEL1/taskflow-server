@@ -16,7 +16,7 @@ const allowedOrigins = () => String(process.env.CLIENT_URL || 'http://localhost:
 // The browser tells us which site the person is on; it must be one of ours. The passkey's "relying party" is that site's hostname.
 function siteFrom(req) {
   const origin = String(req.headers?.origin || '').replace(/\/$/, '');
-  if (!allowedOrigins().includes(origin)) throw new AppError('Fingerprint sign-in is not available from this website address.', 400);
+  if (!allowedOrigins().includes(origin)) throw new AppError(`Fingerprint sign-in is not available from ${origin || 'this website address'}. Please open the site at ${allowedOrigins()[0]}.`, 400);
   return { origin, rpID: new URL(origin).hostname };
 }
 const fail = () => new AppError('Fingerprint sign-in failed. Please try again, or log in with your password.', 401);

@@ -22,6 +22,9 @@ const account = require('../controllers/accountController');
 const onlinePay = require('../controllers/onlinePaymentController');
 const companyCtl = require('../controllers/companyController');
 const passkeyCtl = require('../controllers/passkeyController');
+const featureCtl = require('../controllers/featureController');
+const features = require('../services/featureService');
+const feature = features.requireFeature;
 const aiCtl = require('../controllers/aiController');
 const planCtl = require('../controllers/planController');
 const captureCtl = require('../controllers/captureController');
@@ -37,17 +40,17 @@ const ownerOnly = authorize(ORGANIZATION_OWNER);
 const adminOnly = authorize(SUPER_ADMIN);
 
 // ---- Public ----
-router.get('/health', (req, res) => res.json({ ok: true, version: 'update-5-pricing-bands' })); // open /api/health to see which server version is live
+router.get('/health', (req, res) => res.json({ ok: true, version: 'update-11-fingerprint-security' })); // open /api/health to see which server version is live
 router.get('/plans', billing.plans);
 // router.post('/auth/register', authLimiter, validate(v.register), auth.register);
 router.post('/auth/register', validate(v.register), auth.register);
 // Paystack calls this itself (public on purpose; protected by its signature, checked inside)
 router.post('/webhooks/paystack', onlinePay.webhook);
-router.get('/webhooks/whatsapp', captureCtl.whatsappVerify);
-router.post('/webhooks/whatsapp', captureCtl.whatsappWebhook);
-router.post('/webhooks/mailgun', captureCtl.mailgun);
+router.get('/webhooks/whatsapp', feature('whatsapp'), captureCtl.whatsappVerify);
+router.post('/webhooks/whatsapp', feature('whatsapp'), captureCtl.whatsappWebhook);
+router.post('/webhooks/mailgun', feature('emailForwarding'), captureCtl.mailgun);
 router.post('/assistant/capture', captureLimiter, validate(v.assistantCapture), captureCtl.assistantCapture);
-router.get('/calendar/google/callback', calendarCtl.callback);
+router.get('/calendar/google/callback', feature('calendar'), calendarCtl.callback);
 router.get('/company', companyCtl.get); // public: business + support contact details
 router.post('/auth/login', authLimiter, validate(v.login), auth.login);
 router.post('/auth/google', authLimiter, validate(v.googleLogin), auth.googleLogin);
@@ -74,23 +77,26 @@ router.post('/auth/passkey/register/verify', authLimiter, validate(v.passkeyRegi
 router.delete('/auth/passkeys/:id', authLimiter, passkeyCtl.remove);
 router.put('/auth/email-preferences', validate(v.emailPrefs), auth.updateEmailPrefs);
 router.put('/auth/morning-plan', validate(v.morningPlan), auth.updateMorningPlan);
-router.get('/auth/phone', auth.phoneStatus);
-router.post('/auth/phone/send-code', authLimiter, validate(v.phoneVerificationSend), auth.sendPhoneCode);
-router.post('/auth/phone/verify-code', authLimiter, validate(v.phoneVerificationCode), auth.verifyPhoneCode);
+router.get('/auth/phone', feature('sms'), auth.phoneStatus);
+router.post('/auth/phone/send-code', feature('sms'), authLimiter, validate(v.phoneVerificationSend), auth.sendPhoneCode);
+router.post('/auth/phone/verify-code', feature('sms'), authLimiter, validate(v.phoneVerificationCode), auth.verifyPhoneCode);
+router.get('/features', featureCtl.mine);
+router.get('/settings/features', adminOnly, featureCtl.adminList);
+router.put('/settings/features', adminOnly, requireTwoFactor, validate(v.featureToggle), featureCtl.adminSet);
 router.get('/captures', captureCtl.list);
 router.post('/captures', validate(v.manualCapture), captureCtl.createManual);
 router.delete('/captures/:id', captureCtl.remove);
-router.post('/captures/email-address', authLimiter, captureCtl.emailAddress);
-router.get('/captures/whatsapp', captureCtl.whatsappStatus);
-router.post('/captures/whatsapp/pair', authLimiter, captureCtl.whatsappPair);
-router.delete('/captures/whatsapp', captureCtl.whatsappUnlink);
+router.post('/captures/email-address', feature('emailForwarding'), authLimiter, captureCtl.emailAddress);
+router.get('/captures/whatsapp', feature('whatsapp'), captureCtl.whatsappStatus);
+router.post('/captures/whatsapp/pair', feature('whatsapp'), authLimiter, captureCtl.whatsappPair);
+router.delete('/captures/whatsapp', feature('whatsapp'), captureCtl.whatsappUnlink);
 router.get('/captures/assistant-token', captureCtl.assistantTokenStatus);
 router.post('/captures/assistant-token', authLimiter, captureCtl.createAssistantToken);
 router.delete('/captures/assistant-token', captureCtl.revokeAssistantToken);
-router.get('/calendar/status', calendarCtl.status);
-router.get('/calendar/google/connect', calendarCtl.start);
-router.delete('/calendar/google', calendarCtl.disconnect);
-router.post('/calendar/events', validate(v.calendarEvent), calendarCtl.createEvent);
+router.get('/calendar/status', feature('calendar'), calendarCtl.status);
+router.get('/calendar/google/connect', feature('calendar'), calendarCtl.start);
+router.delete('/calendar/google', feature('calendar'), calendarCtl.disconnect);
+router.post('/calendar/events', feature('calendar'), validate(v.calendarEvent), calendarCtl.createEvent);
 router.put('/auth/profile', validate(v.profile), auth.updateProfile);          // allowed while read-only
 router.put('/auth/password', authLimiter, validate(v.changePassword), auth.changePassword);
 router.post('/auth/2fa/setup', authLimiter, security.setup2fa);

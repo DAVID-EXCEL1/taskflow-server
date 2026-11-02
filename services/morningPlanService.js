@@ -5,6 +5,7 @@ const plan = require('./planService');
 const { buildScope } = require('./taskService');
 const { DEFAULT_TZ } = require('../utils/timezone');
 const sms = require('./smsService');
+const features = require('./featureService');
 const whatsapp = require('./whatsappService');
 const WhatsAppLink = require('../models/WhatsAppLink');
 
@@ -61,6 +62,7 @@ async function runMorningPlans(now = new Date()) {
     const zones = zonesAtTime(now, time, zonesToCheck);
     const includeMissingZone = timeInZone(DEFAULT_TZ, now) === time;
     if (!zones.length && !includeMissingZone) continue;
+    const [smsOn, whatsappOn] = await Promise.all([features.isOn('sms'), features.isOn('whatsapp')]);
     const users = await User.find({
       'morningPlan.enabled': true,
       'morningPlan.time': time,
@@ -88,14 +90,14 @@ async function runMorningPlans(now = new Date()) {
         message: formatPlan(built, tz),
         link: '/dashboard',
       });
-      if (user.morningPlan?.sms && user.smsPhone && user.smsVerifiedAt && sms.configured()) {
+      if (smsOn && user.morningPlan?.sms && user.smsPhone && user.smsVerifiedAt && sms.configured()) {
         try {
           await sms.sendSms({ to: user.smsPhone, message: limitPlan(formatPlan(built, tz), 1500) });
         } catch (error) {
           console.error('Morning plan SMS delivery failed:', error.message);
         }
       }
-      if (user.morningPlan?.whatsapp && whatsapp.configured()) {
+      if (whatsappOn && user.morningPlan?.whatsapp && whatsapp.configured()) {
         try {
           const link = await WhatsAppLink.findOne({ user: user._id }).select('phone').lean();
           if (link?.phone) {
