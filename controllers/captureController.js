@@ -85,8 +85,10 @@ exports.createAssistantToken = asyncHandler(async (req, res) => {
 });
 
 exports.revokeAssistantToken = asyncHandler(async (req, res) => {
-  await AssistantToken.deleteMany({ user: req.user._id });
-  res.json({ success: true, message: 'Assistant access was revoked.' });
+  const result = await AssistantToken.deleteMany({ user: req.user._id });
+  const stillEnabled = await AssistantToken.exists({ user: req.user._id });
+  if (stillEnabled) throw new AppError('The assistant key could not be revoked. Please try again.', 500);
+  res.json({ success: true, data: { enabled: false, revoked: result.deletedCount > 0 }, message: 'Assistant access was revoked.' });
 });
 
 exports.assistantTokenStatus = asyncHandler(async (req, res) => {
